@@ -1,0 +1,527 @@
+'use client'
+
+import React, { useState, useEffect, useMemo } from 'react'
+import { useAppStore } from '@/store/index'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  FileEdit,
+  AlertCircle,
+  Save,
+  Loader2,
+  CheckCircle,
+  Search,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+
+interface SessionData {
+  id: string
+  sessionOne: string
+  sessionTwo: string
+  active: string
+}
+
+interface ClassData {
+  id: string
+  title: string
+}
+
+interface SubjectData {
+  id: string
+  name: string
+}
+
+interface StudentInfo {
+  id: string
+  fullname: string
+  regNo: string
+  gender: string
+  class: string
+}
+
+interface ScoreRow {
+  fullname: string
+  studentId: string
+  firstCa: number
+  secondCa: number
+  thirdCa: number
+  exam: number
+  total: number
+}
+
+export function TeacherScores() {
+  const { user, tenant } = useAppStore()
+  const [sessions, setSessions] = useState<SessionData[]>([])
+  const [classes, setClasses] = useState<ClassData[]>([])
+  const [subjects, setSubjects] = useState<SubjectData[]>([])
+  const [students, setStudents] = useState<StudentInfo[]>([])
+  const [scores, setScores] = useState<ScoreRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [loadingStudents, setLoadingStudents] = useState(false)
+
+  // Filters
+  const [selectedSession, setSelectedSession] = useState('')
+  const [selectedTerm, setSelectedTerm] = useState('')
+  const [selectedClass, setSelectedClass] = useState('')
+  const [selectedSubject, setSelectedSubject] = useState('')
+  const [searchStudent, setSearchStudent] = useState('')
+
+  const primaryColor = tenant?.primaryColor || '#821329'
+
+  useEffect(() => {
+    fetchDropdowns()
+  }, [])
+
+  const fetchDropdowns = async () => {
+    try {
+      setLoading(true)
+      const [sessionsRes, classesRes, subjectsRes] = await Promise.all([
+        fetch('/api/sessions'),
+        fetch('/api/classes'),
+        fetch('/api/subjects'),
+      ])
+      const [sessionsJson, classesJson, subjectsJson] = await Promise.all([
+        sessionsRes.json(),
+        classesRes.json(),
+        subjectsRes.json(),
+      ])
+      const sessionsData = Array.isArray(sessionsJson) ? sessionsJson : (sessionsJson.success ? sessionsJson.data : [])
+      const classesData = Array.isArray(classesJson) ? classesJson : (classesJson.success ? classesJson.data : [])
+      const subjectsData = Array.isArray(subjectsJson) ? subjectsJson : (subjectsJson.success ? subjectsJson.data : [])
+      setSessions(sessionsData)
+      setClasses(classesData)
+      setSubjects(subjectsData)
+    } catch {
+      toast.error('Failed to load dropdown data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const activeSession = useMemo(() => {
+    return sessions.find((s) => s.active === 'Yes')
+  }, [sessions])
+
+  const sessionDisplay = useMemo(() => {
+    if (!selectedSession) return ''
+    const s = sessions.find((s) => s.id === selectedSession)
+    return s ? `${s.sessionOne}/${s.sessionTwo}` : ''
+  }, [selectedSession, sessions])
+
+  useEffect(() => {
+    if (activeSession && !selectedSession) {
+      setSelectedSession(activeSession.id)
+    }
+  }, [activeSession])
+
+  useEffect(() => {
+    if (!selectedSession) return
+    setSelectedTerm('First Term')
+  }, [selectedSession])
+
+  const fetchStudents = async () => {
+    if (!selectedClass) {
+      setStudents([])
+      setScores([])
+      return
+    }
+    try {
+      setLoadingStudents(true)
+      const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
+      const res = await fetch(`/api/students?class=${encodeURIComponent(classTitle)}`)
+      const json = await res.json()
+      const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
+      setStudents(studentData)
+
+      // If subject and session/term are selected, fetch existing scores
+      if (selectedSubject && sessionDisplay && selectedTerm) {
+        fetchExistingScores(classTitle, studentData)
+      } else {
+        // Initialize empty scores
+        setScores(
+          studentData.map((s) => ({
+            fullname: s.fullname,
+            studentId: s.id,
+            firstCa: 0,
+            secondCa: 0,
+            thirdCa: 0,
+            exam: 0,
+            total: 0,
+          }))
+        )
+      }
+    } catch {
+      toast.error('Failed to load students')
+      setStudents([])
+      setScores([])
+    } finally {
+      setLoadingStudents(false)
+    }
+  }
+
+  const fetchExistingScores = async (classTitle: string, studentData: StudentInfo[]) => {
+    if (!selectedSubject) return
+    try {
+      const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
+      const params = new URLSearchParams({
+        session: sessionDisplay,
+        term: selectedTerm,
+        class: classTitle,
+        subject: subjectName,
+      })
+      const res = await fetch(`/api/portal/teacher/scores?${params}`)
+      const json = await res.json()
+      const existingScores = json.success ? json.data : []
+
+      setScores(
+        studentData.map((s) => {
+          const existing = existingScores.find(
+            (sc: Record<string, unknown>) => sc.fullname === s.fullname
+          )
+          return {
+            fullname: s.fullname,
+            studentId: s.id,
+            firstCa: existing ? Number(existing.firstCa) : 0,
+            secondCa: existing ? Number(existing.secondCa) : 0,
+            thirdCa: existing ? Number(existing.thirdCa) : 0,
+            exam: existing ? Number(existing.exam) : 0,
+            total: existing ? Number(existing.total) : 0,
+          }
+        })
+      )
+    } catch {
+      setScores(
+        studentData.map((s) => ({
+          fullname: s.fullname,
+          studentId: s.id,
+          firstCa: 0,
+          secondCa: 0,
+          thirdCa: 0,
+          exam: 0,
+          total: 0,
+        }))
+      )
+    }
+  }
+
+  // Fetch students when class changes
+  useEffect(() => {
+    fetchStudents()
+  }, [selectedClass])
+
+  // Re-fetch existing scores when subject/term/session changes (and students are loaded)
+  useEffect(() => {
+    if (!selectedClass || !selectedSubject || students.length === 0) return
+    const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
+    fetchExistingScores(classTitle, students)
+  }, [selectedSubject, selectedTerm, selectedSession])
+
+  const handleScoreChange = (
+    index: number,
+    field: 'firstCa' | 'secondCa' | 'thirdCa' | 'exam',
+    value: string
+  ) => {
+    const numVal = Math.max(0, Math.min(100, Number(value) || 0))
+    setScores((prev) => {
+      const updated = [...prev]
+      updated[index] = {
+        ...updated[index],
+        [field]: numVal,
+        total:
+          (field === 'firstCa' ? numVal : updated[index].firstCa) +
+          (field === 'secondCa' ? numVal : updated[index].secondCa) +
+          (field === 'thirdCa' ? numVal : updated[index].thirdCa) +
+          (field === 'exam' ? numVal : updated[index].exam),
+      }
+      return updated
+    })
+  }
+
+  const handleSave = async () => {
+    if (!sessionDisplay || !selectedTerm || !selectedClass || !selectedSubject) {
+      toast.error('Please select all filters before saving')
+      return
+    }
+    const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
+    const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
+
+    if (scores.length === 0) {
+      toast.error('No students to save scores for')
+      return
+    }
+
+    try {
+      setSaving(true)
+      const res = await fetch('/api/portal/teacher/scores', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user?.id || '',
+        },
+        body: JSON.stringify({
+          session: sessionDisplay,
+          term: selectedTerm,
+          class: classTitle,
+          subject: subjectName,
+          scores: scores.filter((s) => s.total > 0),
+        }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        toast.success(json.message || `Scores saved successfully (${json.data.created} new, ${json.data.updated} updated)`)
+      } else {
+        toast.error(json.message || 'Failed to save scores')
+      }
+    } catch {
+      toast.error('Network error. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const filteredScores = useMemo(() => {
+    if (!searchStudent) return scores.map((s, i) => ({ ...s, _index: i }))
+    return scores
+      .map((s, i) => ({ ...s, _index: i }))
+      .filter((s) => s.fullname.toLowerCase().includes(searchStudent.toLowerCase()))
+  }, [scores, searchStudent])
+
+  if (loading) {
+    return (
+      <div className="space-y-6 p-4 md:p-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-64 rounded-xl" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 p-4 md:p-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Score Entry</h1>
+          <p className="text-sm text-muted-foreground">
+            Enter and manage exam scores for your students
+          </p>
+        </div>
+        {scores.length > 0 && (
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className="gap-2 text-white"
+            style={{ backgroundColor: primaryColor }}
+          >
+            {saving ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            {saving ? 'Saving...' : 'Save All Scores'}
+          </Button>
+        )}
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Session</Label>
+              <Select value={selectedSession} onValueChange={setSelectedSession}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select session" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sessions.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.sessionOne}/{s.sessionTwo}
+                      {s.active === 'Yes' && ' (Active)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Term</Label>
+              <Select value={selectedTerm} onValueChange={setSelectedTerm}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select term" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="First Term">First Term</SelectItem>
+                  <SelectItem value="Second Term">Second Term</SelectItem>
+                  <SelectItem value="Third Term">Third Term</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Class</Label>
+              <Select value={selectedClass} onValueChange={setSelectedClass}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select class" />
+                </SelectTrigger>
+                <SelectContent>
+                  {classes.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Subject</Label>
+              <Select value={selectedSubject} onValueChange={setSelectedSubject}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Score table */}
+      {selectedClass && selectedSubject ? (
+        loadingStudents ? (
+          <Card>
+            <CardContent className="space-y-3 p-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full rounded-lg" />
+              ))}
+            </CardContent>
+          </Card>
+        ) : students.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-12">
+            <FileEdit className="mb-3 size-10 text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">
+              No students found in this class
+            </p>
+          </div>
+        ) : (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="text-base">
+                  {classes.find((c) => c.id === selectedClass)?.title} &mdash;{' '}
+                  {subjects.find((s) => s.id === selectedSubject)?.name}
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({filteredScores.length} students)
+                  </span>
+                </CardTitle>
+                <div className="relative w-full sm:w-48">
+                  <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Search student..."
+                    value={searchStudent}
+                    onChange={(e) => setSearchStudent(e.target.value)}
+                    className="h-8 w-full rounded-md border bg-background pl-8 pr-3 text-xs outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10 text-center">#</TableHead>
+                      <TableHead className="min-w-[180px]">Student Name</TableHead>
+                      <TableHead className="w-24 text-center">1st CA</TableHead>
+                      <TableHead className="w-24 text-center">2nd CA</TableHead>
+                      <TableHead className="w-24 text-center">3rd CA</TableHead>
+                      <TableHead className="w-24 text-center">Exam</TableHead>
+                      <TableHead className="w-24 text-center font-bold">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredScores.map((row, idx) => (
+                      <TableRow key={row.studentId}>
+                        <TableCell className="text-center text-xs text-muted-foreground">
+                          {idx + 1}
+                        </TableCell>
+                        <TableCell className="font-medium text-sm">
+                          {row.fullname}
+                        </TableCell>
+                        {(['firstCa', 'secondCa', 'thirdCa', 'exam'] as const).map(
+                          (field) => (
+                            <TableCell key={field} className="p-1">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={row[field] || ''}
+                                onChange={(e) =>
+                                  handleScoreChange(row._index!, field, e.target.value)
+                                }
+                                placeholder="0"
+                                className="h-8 w-20 text-center text-sm"
+                              />
+                            </TableCell>
+                          )
+                        )}
+                        <TableCell className="text-center">
+                          <span
+                            className={cn(
+                              'inline-flex h-8 w-20 items-center justify-center rounded-md text-sm font-bold',
+                              row.total > 0
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : 'text-muted-foreground'
+                            )}
+                          >
+                            {row.total || 0}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16">
+          <FileEdit className="mb-3 size-12 text-muted-foreground/30" />
+          <p className="text-sm font-medium text-muted-foreground">
+            Select a class and subject to enter scores
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/70">
+            Choose from the dropdowns above to get started
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
