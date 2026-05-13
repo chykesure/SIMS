@@ -238,7 +238,7 @@ export default function RegisterPage() {
               <GraduationCap className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">SchoolDesk</h1>
+              <h1 className="text-2xl font-bold tracking-tight">CHYKSYS</h1>
               <p className="text-xs font-light tracking-widest text-white/60">MANAGEMENT PLATFORM</p>
             </div>
           </div>
@@ -271,7 +271,7 @@ export default function RegisterPage() {
           </div>
           <div className="h-px bg-white/10" />
           <p className="text-[11px] text-white/30">
-            &copy; {new Date().getFullYear()} SchoolDesk. All rights reserved.
+            &copy; {new Date().getFullYear()} CHYKSYS. All rights reserved.
           </p>
         </div>
       </motion.div>
