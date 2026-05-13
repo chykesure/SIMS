@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 // import { _META } from "@/lib/_META";
-import { FALLBACK_PLANS, getPlansFromDB } from "@/lib/plans";
+import { PLAN_META } from "@/lib/_META";
 
 // ─── GET /api/plan-upgrade ──────────────────────────────────────────────────
 // Lists all upgrade requests for the tenant (uses x-tenant-id header)
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     // Validate requested plan exists and is not free
-    const planConfig = FALLBACK_PLANS[requestedPlan];
+    const planConfig = PLANS_META[requestedPlan];
     if (!planConfig) {
       return NextResponse.json(
         { success: false, message: "Invalid plan. Must be one of: basic, intermediate, premium, growth" },

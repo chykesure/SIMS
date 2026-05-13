@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     // Validate requested plan exists and is not free
-    const planConfig = FALLBACK_PLANS[requestedPlan];
+    const planConfig = PLAN_META[requestedPlan];
     if (!planConfig) {
       return NextResponse.json(
         { success: false, message: "Invalid plan. Must be one of: basic, intermediate, premium, growth" },

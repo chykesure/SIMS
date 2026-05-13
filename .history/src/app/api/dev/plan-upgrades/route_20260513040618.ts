@@ -126,57 +126,57 @@ export async function POST(request: Request) {
     const now = new Date();
 
     if (action === "approve") {
-      // Fetch all plans and find the requested one
-      const allPlans = await getPlansFromDB();
-      const planConfig = allPlans.find((p) => p.planKey === upgradeRequest.requestedPlan);
+  // Fetch all plans and find the requested one
+  const allPlans = await getPlansFromDB();
+  const planConfig = allPlans.find((p) => p.planKey === upgradeRequest.requestedPlan);
 
-      if (!planConfig) {
-        return NextResponse.json(
-          { success: false, message: `Plan '${upgradeRequest.requestedPlan}' not found` },
-          { status: 400 }
-        );
-      }
+  if (!planConfig) {
+    return NextResponse.json(
+      { success: false, message: `Plan '${upgradeRequest.requestedPlan}' not found` },
+      { status: 400 }
+    );
+  }
 
-      // Update the upgrade request status
-      const updatedRequest = await db.planUpgradeRequest.update({
-        where: { id: requestId },
-        data: {
-          status: "approved",
-          reviewedAt: now,
-          adminNote: note || "Approved",
-        },
-      });
+  // Update the upgrade request status
+  const updatedRequest = await db.planUpgradeRequest.update({
+    where: { id: requestId },
+    data: {
+      status: "approved",
+      reviewedAt: now,
+      adminNote: note || "Approved",
+    },
+  });
 
-      // Calculate plan end date (365 days from now — per session / per year)
-      const planEnd = new Date(now);
-      planEnd.setDate(planEnd.getDate() + 365);
+  // Calculate plan end date (365 days from now — per session / per year)
+  const planEnd = new Date(now);
+  planEnd.setDate(planEnd.getDate() + 365);
 
-      // Update tenant plan, limits, and dates
-      await db.tenant.update({
-        where: { id: upgradeRequest.tenantId },
-        data: {
-          plan: planConfig.planKey,
-          maxStudents: planConfig.maxStudents,
-          maxUsers: planConfig.maxUsers,
-          planStart: now,
-          planEnd,
-        },
-      });
+  // Update tenant plan, limits, and dates
+  await db.tenant.update({
+    where: { id: upgradeRequest.tenantId },
+    data: {
+      plan: planConfig.planKey,
+      maxStudents: planConfig.maxStudents,
+      maxUsers: planConfig.maxUsers,
+      planStart: now,
+      planEnd,
+    },
+  });
 
-      // Create activity log for the tenant
-      await db.activityLog.create({
-        data: {
-          tenantId: upgradeRequest.tenantId,
-          action: "plan_changed",
-          details: `Plan upgrade approved: ${upgradeRequest.currentPlan} → ${upgradeRequest.requestedPlan}. ${note ? `Note: ${note}` : ""}`,
-        },
-      });
+  // Create activity log for the tenant
+  await db.activityLog.create({
+    data: {
+      tenantId: upgradeRequest.tenantId,
+      action: "plan_changed",
+      details: `Plan upgrade approved: ${upgradeRequest.currentPlan} → ${upgradeRequest.requestedPlan}. ${note ? `Note: ${note}` : ""}`,
+    },
+  });
 
-      return NextResponse.json({
-        success: true,
-        data: updatedRequest,
-      });
-    }
+  return NextResponse.json({
+    success: true,
+    data: updatedRequest,
+  });
+}
 
     // action === "reject"
     const updatedRequest = await db.planUpgradeRequest.update({

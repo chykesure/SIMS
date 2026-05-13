@@ -126,16 +126,7 @@ export async function POST(request: Request) {
     const now = new Date();
 
     if (action === "approve") {
-      // Fetch all plans and find the requested one
-      const allPlans = await getPlansFromDB();
-      const planConfig = allPlans.find((p) => p.planKey === upgradeRequest.requestedPlan);
-
-      if (!planConfig) {
-        return NextResponse.json(
-          { success: false, message: `Plan '${upgradeRequest.requestedPlan}' not found` },
-          { status: 400 }
-        );
-      }
+      const planConfig = getPlanConfig(upgradeRequest.requestedPlan);
 
       // Update the upgrade request status
       const updatedRequest = await db.planUpgradeRequest.update({
@@ -155,7 +146,7 @@ export async function POST(request: Request) {
       await db.tenant.update({
         where: { id: upgradeRequest.tenantId },
         data: {
-          plan: planConfig.planKey,
+          plan: planConfig.id,
           maxStudents: planConfig.maxStudents,
           maxUsers: planConfig.maxUsers,
           planStart: now,
