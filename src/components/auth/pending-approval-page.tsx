@@ -20,7 +20,7 @@ export default function PendingApprovalPage() {
         >
           <GraduationCap className="h-5 w-5 text-white" />
         </div>
-        <span className="text-lg font-bold">SchoolDesk</span>
+        <span className="text-lg font-bold">SIMS</span>
       </div>
 
       {/* Content */}
@@ -114,7 +114,7 @@ export default function PendingApprovalPage() {
                   Back to Sign In
                 </Button>
                 <a
-                  href="mailto:support@schooldesk.com"
+                  href="mailto:support@simshool.ng"
                   className="flex items-center justify-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <Mail className="h-4 w-4" />

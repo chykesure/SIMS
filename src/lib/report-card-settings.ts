@@ -37,7 +37,7 @@ const DEFAULT_VISIBILITY: ReportCardVisibility = {
   footer: true,
 };
 
-const STORAGE_KEY_PREFIX = "schooldesk_rc_visibility_";
+const STORAGE_KEY_PREFIX = "sims_rc_visibility_";
 
 export function getReportCardVisibility(tenantId: string | null): ReportCardVisibility {
   if (typeof window === "undefined") return DEFAULT_VISIBILITY;

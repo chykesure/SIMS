@@ -4,8 +4,8 @@ import path from 'path'
 
 const FILES: Record<string, { filepath: string; filename: string; contentType: string }> = {
   source: {
-    filepath: '/home/z/schooldesk-source.tar.gz',
-    filename: 'schooldesk-source.tar.gz',
+    filepath: '/home/z/sims-source.tar.gz',
+    filename: 'sims-source.tar.gz',
     contentType: 'application/gzip',
   },
   guide: {

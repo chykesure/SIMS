@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       const nameParts = fullname.trim().toLowerCase().split(" ");
       const first = nameParts[0] || "teacher";
       const last = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
-      teacherEmail = last ? `${first}.${last}@schooldesk.local` : `${first}@schooldesk.local`;
+      teacherEmail = last ? `${first}.${last}@school.sims.ng` : `${first}@school.sims.ng`;
     }
 
     const teacher = await db.teacher.create({

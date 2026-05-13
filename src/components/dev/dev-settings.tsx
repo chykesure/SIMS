@@ -49,14 +49,14 @@ export function DevSettings() {
   const { user } = useAppStore()
 
   // Platform settings state
-  const [platformName, setPlatformName] = useState('SchoolDesk')
-  const [supportEmail, setSupportEmail] = useState('support@schooldesk.ng')
-  const [platformUrl, setPlatformUrl] = useState('https://schooldesk.ng')
+  const [platformName, setPlatformName] = useState('SIMS')
+  const [supportEmail, setSupportEmail] = useState('support@simshool.ng')
+  const [platformUrl, setPlatformUrl] = useState('https://simshool.ng')
   const [saving, setSaving] = useState(false)
 
   // Profile state
   const [profileName, setProfileName] = useState(user?.username || 'SuperAdmin')
-  const [profileEmail, setProfileEmail] = useState(user?.email || 'admin@schooldesk.ng')
+  const [profileEmail, setProfileEmail] = useState(user?.email || 'admin@simshool.ng')
 
   // Exchange rate state
   const [exchangeRate, setExchangeRate] = useState('1500')
@@ -68,7 +68,7 @@ export function DevSettings() {
 
   // Simulated system info
   const systemInfo = [
-    { label: 'Application', value: 'SchoolDesk v2.0.0' },
+    { label: 'Application', value: 'SIMS v2.0.0' },
     { label: 'Framework', value: 'Next.js 16' },
     { label: 'Database', value: 'SQLite (Prisma ORM)' },
     { label: 'Runtime', value: 'Bun' },

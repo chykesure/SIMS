@@ -531,7 +531,7 @@ export default function LoginPage() {
               <GraduationCap className="h-5 w-5" />
             </div>
             <span className="text-xl font-bold tracking-tight text-slate-900">
-              School<span style={{ color: "#C0522B" }}>Desk</span>
+              SIMS
             </span>
           </div>
           <div className="hidden items-center gap-6 md:flex">
@@ -616,7 +616,7 @@ export default function LoginPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
             <Badge variant="outline" className="mb-4 border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Everything You Need</Badge>
             <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Powerful Features for Every School</h2>
-            <p className="mt-4 text-base leading-relaxed text-slate-600">From student enrollment to result computation, SchoolDesk covers every aspect of school administration.</p>
+            <p className="mt-4 text-base leading-relaxed text-slate-600">From student enrollment to result computation, SIMS covers every aspect of school administration.</p>
           </motion.div>
           <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((feature, i) => {
@@ -635,11 +635,11 @@ export default function LoginPage() {
         </div>
       </section>
 
-      {/* WHY SCHOOLDESK */}
+      {/* WHY SIMS */}
       <section className="border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white py-20 sm:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Why Schools Choose SchoolDesk</h2>
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Why Schools Choose SIMS</h2>
             <p className="mt-4 text-base text-slate-600">Built specifically for the Nigerian education system with features that matter most.</p>
           </motion.div>
           <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
@@ -722,7 +722,7 @@ export default function LoginPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
             <GraduationCap className="mx-auto h-12 w-12 text-white/20" />
             <h2 className="mt-6 text-3xl font-bold text-white sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Ready to Transform Your School?</h2>
-            <p className="mt-4 text-base text-slate-400">Join hundreds of schools already using SchoolDesk to manage everything efficiently.</p>
+            <p className="mt-4 text-base text-slate-400">Join hundreds of schools already using SIMS to manage everything efficiently.</p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Button size="lg" className="h-12 px-8 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: "#C0522B" }} onClick={() => navigate("register")}>
                 Create Your School Account
@@ -745,7 +745,7 @@ export default function LoginPage() {
                 <GraduationCap className="h-4 w-4" />
               </div>
               <span className="text-sm font-semibold text-slate-900">
-                School<span style={{ color: "#C0522B" }}>Desk</span>
+                SIMS
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-slate-500">
@@ -753,7 +753,7 @@ export default function LoginPage() {
               <button onClick={() => navigate("register")} className="transition-colors hover:text-slate-700">Register</button>
               <button onClick={() => { setShowLoginModal(true); setStatusError(null); }} className="transition-colors hover:text-slate-700">Sign In</button>
             </div>
-            <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()} SchoolDesk. All rights reserved.</p>
+            <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()} SIMS. All rights reserved.</p>
           </div>
           {/* Dev access - very subtle */}
           <div className="mt-8 text-center">
@@ -834,7 +834,7 @@ export default function LoginPage() {
           <form onSubmit={handleDevLogin} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="devEmail">Developer Email</Label>
-              <Input id="devEmail" type="email" placeholder="admin@schooldesk.com" value={devEmail} onChange={(e) => setDevEmail(e.target.value)} required />
+              <Input id="devEmail" type="email" placeholder="admin@simshool.ng" value={devEmail} onChange={(e) => setDevEmail(e.target.value)} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="devPassword">Password</Label>

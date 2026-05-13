@@ -178,7 +178,7 @@ export async function getDisplayPlans(): Promise<PlanDisplay[]> {
       period: `/${Math.round(p.validityDays / 30)} months`,
       icon: meta.icon,
       color: meta.color,
-      features: p.features.map((f) => f.label),
+      features: p.features.map((f) => typeof f === "string" ? f : (f as PlanFeature).label || ""),
       cta: `Start ${p.name} Plan`,
       popular: p.planKey === "premium",
       priceNGN: p.priceNGN,

@@ -27,6 +27,7 @@ import ClassPositionView from "@/components/position/class-position";
 import SubjectPositionView from "@/components/position/subject-position";
 import UserListView from "@/components/users/user-list";
 import AssessmentSettingsView from "@/components/settings/assessment-settings";
+import { SubscriptionPage } from "@/components/settings/subscription-page";
 import { FinanceView } from "@/components/finance/finance-view";
 import { ClassroomView } from "@/components/classroom/classroom-view";
 import { DevSidebar } from "@/components/dev/dev-sidebar";
@@ -62,7 +63,6 @@ import { BudgetView } from "@/components/budgets/budget-view";
 import { InventoryView } from "@/components/inventory/inventory-view";
 import { VoucherView } from "@/components/vouchers/voucher-view";
 import SessionSelectPage from "@/components/auth/session-select-page";
-import { SubscriptionPage } from "@/components/settings/subscription-page";
 
 export default function Home() {
   const { currentPage, isAuthenticated, isSuperAdmin, sidebarOpen, tenant, user, selectedSchoolId } = useAppStore();
@@ -82,9 +82,6 @@ export default function Home() {
 
   // Session/Term selection (shown after login, before dashboard)
   if (currentPage === "session-select") return <SessionSelectPage />;
-
-  // Subscription page
-  if (currentPage === "subscription") return <SubscriptionPage />;
 
   // ============================
   // STUDENT PORTAL
@@ -114,7 +111,7 @@ export default function Home() {
           <main className="flex-1 p-4 md:p-6">{renderStudentView()}</main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
-              © {new Date().getFullYear()} {tenant?.name || "SchoolDesk"} — Student Portal
+              © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Student Portal
             </p>
           </footer>
         </div>
@@ -150,7 +147,7 @@ export default function Home() {
           <main className="flex-1 p-4 md:p-6">{renderTeacherView()}</main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
-              © {new Date().getFullYear()} {tenant?.name || "SchoolDesk"} — Teacher Portal
+              © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Teacher Portal
             </p>
           </footer>
         </div>
@@ -184,7 +181,7 @@ export default function Home() {
           <main className="flex-1 p-4 md:p-6">{renderParentView()}</main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
-              © {new Date().getFullYear()} {tenant?.name || "SchoolDesk"} — Parent Portal
+              © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Parent Portal
             </p>
           </footer>
         </div>
@@ -232,7 +229,7 @@ export default function Home() {
           <main className="flex-1 p-4 md:p-6">{renderDevView()}</main>
           <footer className="border-t border-slate-800/60 bg-slate-950/80 px-6 py-3 mt-auto">
             <p className="text-center text-xs text-slate-500">
-              © {new Date().getFullYear()} SchoolDesk — Platform Admin Dashboard
+              © {new Date().getFullYear()} SIMS — Platform Admin Dashboard
             </p>
           </footer>
         </div>
@@ -313,7 +310,7 @@ export default function Home() {
         <main className="flex-1 p-4 md:p-6">{renderView()}</main>
         <footer className="border-t bg-white px-6 py-3">
           <p className="text-center text-xs text-muted-foreground">
-            © {new Date().getFullYear()} {tenant?.name || "SchoolDesk"} — Complete School Management
+            © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Complete School Management
           </p>
         </footer>
       </div>

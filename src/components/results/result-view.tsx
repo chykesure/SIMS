@@ -122,6 +122,36 @@ interface SchoolSettings {
   totalMax: number;
 }
 
+/* ===== CUMULATIVE TYPES (for /api/exams/cumulative) ===== */
+
+interface CumulativeStudent {
+  fullname: string;
+  subjects: CumulativeSubject[];
+  firstTermTotal: number;
+  secondTermTotal: number;
+  thirdTermTotal?: number;
+  cumulativeTotal: number;
+  subjectsTaken: number;
+  cumulativeAverage: number;
+  cumulativePercentage: number;
+}
+
+interface CumulativeSubject {
+  subject: string;
+  firstTerm: { firstCa: number; secondCa: number; thirdCa: number; exam: number; total: number } | null;
+  secondTerm: { firstCa: number; secondCa: number; thirdCa: number; exam: number; total: number } | null;
+  thirdTerm?: { firstCa: number; secondCa: number; thirdCa: number; exam: number; total: number } | null;
+  cumulativeTotal: number;
+}
+
+interface SubjectCumulativeData {
+  firstTermTotal: number;
+  secondTermTotal: number;
+  cumulativeTotal: number;
+  cumulativeAvg: number;
+  rank: number;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Grading helpers                                                    */
 /* ------------------------------------------------------------------ */
@@ -319,6 +349,11 @@ function buildRCStyles(primaryColor: string | null) {
       fontWeight: 600, fontSize: 8, letterSpacing: 0.3, textTransform: "uppercase" as const,
       borderRight: "none",
     },
+    thCum: {
+      background: "#1e40af", color: "white", padding: "3px 4px", textAlign: "center" as const,
+      fontWeight: 700, fontSize: 7, letterSpacing: 0.3, textTransform: "uppercase" as const,
+      borderRight: "1px solid rgba(255,255,255,0.15)",
+    },
     td: {
       padding: "2px 4px", textAlign: "center" as const,
       borderBottom: "1px solid #f3f4f6", fontSize: 9,
@@ -334,6 +369,16 @@ function buildRCStyles(primaryColor: string | null) {
     tdAltLeft: {
       padding: "2px 6px", textAlign: "left" as const,
       borderBottom: "1px solid #f3f4f6", fontWeight: 500, fontSize: 9, background: pcLight,
+    },
+    tdCum: {
+      padding: "2px 3px", textAlign: "center" as const,
+      borderBottom: "1px solid #f3f4f6", fontSize: 8, fontWeight: 600,
+      background: "#eff6ff", color: "#1e40af",
+    },
+    tdCumAlt: {
+      padding: "2px 3px", textAlign: "center" as const,
+      borderBottom: "1px solid #f3f4f6", fontSize: 8, fontWeight: 600,
+      background: "#dbeafe", color: "#1e40af",
     },
     totalRow: {
       padding: "2px 4px", fontWeight: 700, background: pcLight, fontSize: 9,
@@ -478,6 +523,17 @@ function buildPrintHTML(
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
+    /* Cumulative columns header */
+    th.cum-header {
+      background-color: #1e40af !important;
+    }
+    /* Cumulative columns cells */
+    td.cum-cell {
+      background-color: #eff6ff !important;
+      color: #1e40af !important;
+      font-weight: 600;
+      font-size: 7.5pt !important;
+    }
     th[style*="text-align: left"] { text-align: left !important; }
     td[style*="text-align: left"]  { text-align: left !important; }
     img { max-width: 55px !important; max-height: 55px !important; }
@@ -534,6 +590,9 @@ export default function ResultView() {
     getReportCardVisibility(tenant?.id ?? null)
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  /* ===== CUMULATIVE STATE ===== */
+  const [cumulativeData, setCumulativeData] = useState<Record<string, SubjectCumulativeData>>({});
 
   const printAreaRef = useRef<HTMLDivElement>(null);
   const RC = buildRCStyles(tenant?.primaryColor ?? null);
@@ -602,6 +661,71 @@ export default function ResultView() {
   }, [selectedSession, selectedClass, selectedTerm, computeResults]);
 
   /* ================================================================ */
+  /*  CUMULATIVE: Process data from /api/exams/cumulative              */
+  /* ================================================================ */
+
+  function processCumulativeData(
+    students: CumulativeStudent[],
+    studentFullname: string,
+    term: string
+  ) {
+    const termCount = term === "Third Term" ? 3 : term === "Second Term" ? 2 : 1;
+    const dataMap: Record<string, SubjectCumulativeData> = {};
+
+    /* --- Build subject → [{fullname, cumAvg}] for ranking --- */
+    const subjectEntries = new Map<string, { fullname: string; cumAvg: number }[]>();
+
+    for (const student of students) {
+      for (const subj of student.subjects) {
+        if (!subjectEntries.has(subj.subject)) {
+          subjectEntries.set(subj.subject, []);
+        }
+        const cumAvg = termCount > 0 ? subj.cumulativeTotal / termCount : 0;
+        subjectEntries.get(subj.subject)!.push({
+          fullname: student.fullname,
+          cumAvg: parseFloat(cumAvg.toFixed(2)),
+        });
+      }
+    }
+
+    /* --- Rank students per subject (descending cumulative avg) --- */
+    const rankMap: Record<string, Record<string, number>> = {};
+    for (const [subject, entries] of subjectEntries) {
+      entries.sort((a, b) => b.cumAvg - a.cumAvg);
+      let rank = 1;
+      const subjectRanks: Record<string, number> = {};
+      entries.forEach((entry, idx) => {
+        if (idx > 0 && entry.cumAvg < entries[idx - 1].cumAvg) {
+          rank = idx + 1;
+        }
+        subjectRanks[entry.fullname] = rank;
+      });
+      rankMap[subject] = subjectRanks;
+    }
+
+    /* --- Extract this student's per-subject cumulative data --- */
+    const thisStudent = students.find((s) => s.fullname === studentFullname);
+    if (thisStudent) {
+      for (const subj of thisStudent.subjects) {
+        const firstTermTotal = subj.firstTerm?.total ?? 0;
+        const secondTermTotal = subj.secondTerm?.total ?? 0;
+        const cumAvg = termCount > 0 ? subj.cumulativeTotal / termCount : 0;
+        const rank = rankMap[subj.subject]?.[studentFullname] ?? 0;
+
+        dataMap[subj.subject] = {
+          firstTermTotal,
+          secondTermTotal,
+          cumulativeTotal: subj.cumulativeTotal,
+          cumulativeAvg: parseFloat(cumAvg.toFixed(2)),
+          rank,
+        };
+      }
+    }
+
+    setCumulativeData(dataMap);
+  }
+
+  /* ================================================================ */
   /*  Report card                                                      */
   /* ================================================================ */
 
@@ -609,6 +733,7 @@ export default function ResultView() {
     setReportStudent(record); setReportOpen(true); setReportLoading(true);
     setStudentData(null); setTeacherRemark(""); setPrincipalRemark("");
     setTeacherSignature(null); setPrincipalSignature(null); setResumptionInfo(null);
+    setCumulativeData({});
     try {
       const params = new URLSearchParams({ session: selectedSession, class: selectedClass, term: selectedTerm, fullname: record.fullname });
       const [scoreRes, studentRes, teacherRemarkRes, principalRemarkRes, signaturesRes, resumptionRes] = await Promise.all([
@@ -618,10 +743,26 @@ export default function ResultView() {
       ]);
       if (scoreRes.ok) setReportScores(await scoreRes.json()); else setReportScores([]);
       if (studentRes.ok) { const students = await studentRes.json(); setStudentData(students.find((s: StudentData) => s.fullname.toLowerCase() === record.fullname.toLowerCase()) || null); }
-      if (teacherRemarkRes.ok) { const remarks = await teacherRemarkRes.json(); setTeacherRemark(remarks.find((r) => r.session === selectedSession && r.term === selectedTerm)?.remark || ""); }
-      if (principalRemarkRes.ok) { const remarks = await principalRemarkRes.json(); setPrincipalRemark(remarks.find((r) => r.session === selectedSession && r.term === selectedTerm)?.remark || ""); }
+      if (teacherRemarkRes.ok) { const remarks = await teacherRemarkRes.json(); setTeacherRemark(remarks.find((r: any) => r.session === selectedSession && r.term === selectedTerm)?.remark || ""); }
+      if (principalRemarkRes.ok) { const remarks = await principalRemarkRes.json(); setPrincipalRemark(remarks.find((r: any) => r.session === selectedSession && r.term === selectedTerm)?.remark || ""); }
       if (signaturesRes.ok) { const sigs = await signaturesRes.json(); if (sigs.teacherSignature) setTeacherSignature(sigs.teacherSignature); if (sigs.principalSignature) setPrincipalSignature(sigs.principalSignature); }
-      if (resumptionRes.ok) { const resumptions = await resumptionRes.json(); const m = resumptions.find((r) => r.session === selectedSession && r.term === selectedTerm); if (m) setResumptionInfo({ openTerm: m.openTerm, nextTerm: m.nextTerm, noSchoolOpen: m.noSchoolOpen }); }
+      if (resumptionRes.ok) { const resumptions = await resumptionRes.json(); const m = resumptions.find((r: any) => r.session === selectedSession && r.term === selectedTerm); if (m) setResumptionInfo({ openTerm: m.openTerm, nextTerm: m.nextTerm, noSchoolOpen: m.noSchoolOpen }); }
+
+      /* ===== CUMULATIVE: Fetch cumulative data for subject rankings & prev totals ===== */
+      try {
+        const cumParams = new URLSearchParams({
+          session: selectedSession,
+          class: selectedClass,
+          term: selectedTerm,
+        });
+        const cumRes = await fetch(`/api/exams/cumulative?${cumParams}`);
+        if (cumRes.ok) {
+          const cumResult = await cumRes.json();
+          if (cumResult.success && cumResult.students && cumResult.students.length > 0) {
+            processCumulativeData(cumResult.students, record.fullname, selectedTerm);
+          }
+        }
+      } catch { /* cumulative data optional — degrade gracefully */ }
     } catch { setReportScores([]); }
     finally { setReportLoading(false); }
   }
@@ -662,17 +803,51 @@ export default function ResultView() {
   const showThirdCa = caCount >= 3;
   const pc = getPrimaryColor(tenant?.primaryColor ?? null);
 
+  /* ===== CUMULATIVE FLAGS ===== */
+  const isSecondTerm = selectedTerm === "Second Term";
+  const isThirdTerm = selectedTerm === "Third Term";
+  const isCumulative = isSecondTerm || isThirdTerm;
+
   const columnTotals_calc = reportScores.length > 0
     ? {
-        firstCaTotal: reportScores.reduce((s, e) => s + (e.firstCa || 0), 0),
-        secondCaTotal: reportScores.reduce((s, e) => s + (e.secondCa || 0), 0),
-        thirdCaTotal: reportScores.reduce((s, e) => s + (e.thirdCa || 0), 0),
-        examTotal: reportScores.reduce((s, e) => s + (e.exam || 0), 0),
-      }
+      firstCaTotal: reportScores.reduce((s, e) => s + (e.firstCa || 0), 0),
+      secondCaTotal: reportScores.reduce((s, e) => s + (e.secondCa || 0), 0),
+      thirdCaTotal: reportScores.reduce((s, e) => s + (e.thirdCa || 0), 0),
+      examTotal: reportScores.reduce((s, e) => s + (e.exam || 0), 0),
+    }
     : { firstCaTotal: 0, secondCaTotal: 0, thirdCaTotal: 0, examTotal: 0 };
 
   const studentTotalFromScores = reportScores.reduce((s, e) => s + (e.total || 0), 0);
   const subjectsTakenFromScores = reportScores.length;
+
+  /* ===== CUMULATIVE TOTALS (for totals row) ===== */
+  const cumFirstTermTotal = reportScores.reduce(
+    (s, e) => s + (cumulativeData[e.subject]?.firstTermTotal ?? 0), 0
+  );
+  const cumSecondTermTotal = isThirdTerm
+    ? reportScores.reduce(
+      (s, e) => s + (cumulativeData[e.subject]?.secondTermTotal ?? 0), 0
+    )
+    : 0;
+  const cumActualTotal = reportScores.reduce(
+    (s, e) => s + (cumulativeData[e.subject]?.cumulativeTotal ?? e.total), 0
+  );
+
+  /* ===== CUMULATIVE SUMMARY VALUES ===== */
+  const cumTermCount = isThirdTerm ? 3 : isSecondTerm ? 2 : 1;
+  const displayTotalScore = isCumulative ? cumActualTotal : studentTotalFromScores;
+  const displayAverage = isCumulative && subjectsTakenFromScores > 0
+    ? parseFloat((cumActualTotal / (subjectsTakenFromScores * cumTermCount)).toFixed(1))
+    : reportStudent?.average ?? 0;
+
+  /* ===== PASSED / FAILED COUNTS ===== */
+  const reportPassedCount = reportScores.filter((sc) => {
+    const score = isCumulative && cumulativeData[sc.subject]
+      ? cumulativeData[sc.subject].cumulativeAvg
+      : sc.total;
+    return score >= 40;
+  }).length;
+  const reportFailedCount = subjectsTakenFromScores - reportPassedCount;
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -886,14 +1061,34 @@ export default function ResultView() {
                             {showThirdCa && <th style={RC.th}>{schoolSettings.ca3Label}</th>}
                             <th style={RC.th}>{schoolSettings.examLabel}</th>
                             <th style={RC.th}>Total</th>
+                            {/* ===== CUMULATIVE COLUMNS ===== */}
+                            {isCumulative && (
+                              <>
+                                <th style={RC.thCum}>1st Term</th>
+                                {isThirdTerm && <th style={RC.thCum}>2nd Term</th>}
+                                <th style={RC.thCum}>Actual</th>
+                                <th style={RC.thCum}>Cum Avg</th>
+                              </>
+                            )}
+                            {/* ===== SUBJECT RANK (all terms) ===== */}
                             <th style={RC.th}>Gr</th>
+                            <th style={RC.th}>Rank</th>
                             <th style={RC.thLast}>Remark</th>
                           </tr>
                         </thead>
                         <tbody>
                           {reportScores.map((sc, idx) => {
-                            const g = getGrade(sc.total, reportStudent.class);
+                            const cum = cumulativeData[sc.subject];
                             const isAlt = idx % 2 === 1;
+
+                            /* Grade: cumulative avg for 2nd/3rd term, current total for 1st */
+                            const gradeInput = isCumulative && cum ? cum.cumulativeAvg : sc.total;
+                            const g = getGrade(gradeInput, reportStudent.class);
+                            const rank = cum?.rank ?? 0;
+
+                            /* Cumulative cell styles */
+                            const cumStyle = isAlt ? RC.tdCumAlt : RC.tdCum;
+
                             return (
                               <tr key={sc.id}>
                                 <td style={isAlt ? RC.tdAlt : RC.td}>{idx + 1}</td>
@@ -903,12 +1098,43 @@ export default function ResultView() {
                                 {showThirdCa && <td style={isAlt ? RC.tdAlt : RC.td}>{sc.thirdCa}</td>}
                                 <td style={isAlt ? RC.tdAlt : RC.td}>{sc.exam}</td>
                                 <td style={{ ...(isAlt ? RC.tdAlt : RC.td), fontWeight: 700 }}>{sc.total}</td>
-                                <td style={isAlt ? RC.tdAlt : RC.td}><span style={RC.gradeBadge(g.color)}>{g.grade}</span></td>
+
+                                {/* ===== CUMULATIVE CELLS ===== */}
+                                {isCumulative && (
+                                  <>
+                                    <td className="cum-cell" style={cumStyle}>
+                                      {cum?.firstTermTotal ?? 0}
+                                    </td>
+                                    {isThirdTerm && (
+                                      <td className="cum-cell" style={cumStyle}>
+                                        {cum?.secondTermTotal ?? 0}
+                                      </td>
+                                    )}
+                                    <td className="cum-cell" style={{ ...cumStyle, fontWeight: 800 }}>
+                                      {cum?.cumulativeTotal ?? sc.total}
+                                    </td>
+                                    <td className="cum-cell" style={cumStyle}>
+                                      {cum?.cumulativeAvg ?? "—"}
+                                    </td>
+                                  </>
+                                )}
+
+                                {/* ===== SUBJECT RANK ===== */}
+                                <td style={isAlt ? RC.tdAlt : RC.td}>
+                                  <span style={RC.gradeBadge(g.color)}>{g.grade}</span>
+                                </td>
+                                <td style={isAlt ? RC.tdAlt : RC.td}>
+                                  {rank > 0 ? (
+                                    <span style={{ fontWeight: 700, fontSize: 9, color: rank <= 3 ? "#1e40af" : "#374151" }}>
+                                      {rank}
+                                    </span>
+                                  ) : "—"}
+                                </td>
                                 <td style={{ ...(isAlt ? RC.tdAlt : RC.td), textAlign: "left", fontSize: 8 }}>{g.remark}</td>
                               </tr>
                             );
                           })}
-                          {/* TOTAL */}
+                          {/* TOTAL ROW */}
                           <tr>
                             <td style={{ ...RC.totalRow, textAlign: "left", borderRight: "none" }} colSpan={2}>TOTAL</td>
                             <td style={RC.totalRow}>{columnTotals_calc.firstCaTotal}</td>
@@ -916,6 +1142,31 @@ export default function ResultView() {
                             {showThirdCa && <td style={RC.totalRow}>{columnTotals_calc.thirdCaTotal}</td>}
                             <td style={RC.totalRow}>{columnTotals_calc.examTotal}</td>
                             <td style={{ ...RC.totalRow, fontWeight: 800, color: pc }}>{studentTotalFromScores}</td>
+
+                            {/* ===== CUMULATIVE TOTALS ===== */}
+                            {isCumulative && (
+                              <>
+                                <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 700 }}>
+                                  {cumFirstTermTotal || "—"}
+                                </td>
+                                {isThirdTerm && (
+                                  <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 700 }}>
+                                    {cumSecondTermTotal || "—"}
+                                  </td>
+                                )}
+                                <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 800 }}>
+                                  {cumActualTotal || "—"}
+                                </td>
+                                <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 700 }}>
+                                  {subjectsTakenFromScores > 0
+                                    ? (cumActualTotal / (subjectsTakenFromScores * (isThirdTerm ? 3 : 2))).toFixed(1)
+                                    : "—"}
+                                </td>
+                              </>
+                            )}
+
+                            {/* Subject Rank + Remark totals - empty */}
+                            <td style={RC.totalRow}></td>
                             <td style={RC.totalRow}></td>
                             <td style={RC.totalRow}></td>
                           </tr>
@@ -937,23 +1188,27 @@ export default function ResultView() {
                       <div style={{ ...RC.summaryRow, flex: 1 }}>
                         <div style={RC.summaryCell}>
                           <div style={RC.summaryLabelInline}>Total Score</div>
-                          <div style={RC.summaryValueInline}>{studentTotalFromScores}</div>
+                          <div style={RC.summaryValueInline}>{displayTotalScore}</div>
                         </div>
                         <div style={RC.summaryCell}>
                           <div style={RC.summaryLabelInline}>Average</div>
-                          <div style={RC.summaryValueInline}>{reportStudent.average.toFixed(1)}</div>
+                          <div style={RC.summaryValueInline}>{displayAverage.toFixed(1)}</div>
                         </div>
                         <div style={RC.summaryCell}>
                           <div style={RC.summaryLabelInline}>Grade</div>
                           <div style={{ fontSize: 11, fontWeight: 700 }}>
-                            <span style={{ background: overallGrade(reportStudent.average).color, color: "white", padding: "1px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600 }}>
-                              {overallGrade(reportStudent.average).grade}
+                            <span style={{ background: overallGrade(displayAverage).color, color: "black", padding: "1px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600 }}>
+                              {overallGrade(displayAverage).grade}
                             </span>
                           </div>
                         </div>
+                        <div style={RC.summaryCell}>
+                          <div style={RC.summaryLabelInline}>Passed</div>
+                          <div style={{ ...RC.summaryValueInline, color: "#059669", fontSize: 12 }}>{reportPassedCount}</div>
+                        </div>
                         <div style={RC.summaryCellLast}>
-                          <div style={RC.summaryLabelInline}>Subjects</div>
-                          <div style={RC.summaryValueInline}>{subjectsTakenFromScores}</div>
+                          <div style={RC.summaryLabelInline}>Failed</div>
+                          <div style={{ ...RC.summaryValueInline, color: "#dc2626", fontSize: 12 }}>{reportFailedCount}</div>
                         </div>
                       </div>
                     )}
