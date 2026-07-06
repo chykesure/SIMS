@@ -380,6 +380,7 @@ export default function LoginPage() {
             <span className="text-xl font-bold tracking-tight text-slate-900">CHYKSYS</span>
           </div>
           <div className="hidden items-center gap-6 md:flex">
+            <a href="/" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Homepage</a>
             <button onClick={() => navigate("admission")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Admission</button>
             <button onClick={() => navigate("register")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Register</button>
           </div>
@@ -491,6 +492,7 @@ export default function LoginPage() {
           <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
             <div className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-4 w-4" /></div><span className="text-sm font-semibold text-slate-900">CHYKSYS</span></div>
             <div className="flex items-center gap-6 text-sm text-slate-500">
+              <a href="/" className="transition-colors hover:text-slate-700">Homepage</a>
               <button onClick={() => navigate("admission")} className="transition-colors hover:text-slate-700">Admission</button>
               <button onClick={() => navigate("register")} className="transition-colors hover:text-slate-700">Register</button>
               <button onClick={() => { setShowLoginModal(true); setStatusError(null); }} className="transition-colors hover:text-slate-700">Sign In</button>

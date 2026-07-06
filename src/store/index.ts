@@ -62,7 +62,8 @@ export type PageView =
   | "teacher-add-student"
   | "teacher-students"
   | "teacher-ai-assistant"
-  | "teacher-subjects";
+  | "teacher-subjects"
+  | "attendance";
 
 const VALID_PAGES = new Set<string>([
   "login", "register", "pending-approval", "admission", "session-select",
@@ -87,6 +88,7 @@ interface User {
   email: string;
   username: string;
   role: string;
+  roles?: string[];  // NEW: multi-role support from UserRole table
   imageUrl?: string;
   tenantId?: string | null;
   studentId?: string | null;

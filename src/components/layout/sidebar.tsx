@@ -1,3 +1,4 @@
+// src/components/layout/sidebar.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -40,6 +41,9 @@ import {
   ChevronRight,
   Sparkles,
   Shield,
+  Package,
+  Receipt,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -126,6 +130,18 @@ const ADMIN_ITEMS: NavItem[] = [
   { label: "Users", page: "users", icon: UserCog },
 ];
 
+const BURSAR_ITEMS: NavItem[] = [
+  { label: "Finance", page: "finance", icon: Wallet },
+  { label: "Budgets", page: "budgets", icon: BarChart3 },
+  { label: "Inventory", page: "inventory", icon: Package },
+  { label: "Vouchers", page: "vouchers", icon: Receipt },
+];
+
+const CLASS_TEACHER_ITEMS: NavItem[] = [
+  { label: "My Students", page: "teacher-students", icon: Users },
+  { label: "Attendance", page: "attendance", icon: ClipboardCheck },
+];
+
 /* ────────────────────────────────────────────── */
 /*  Single Nav Item                               */
 /* ────────────────────────────────────────────── */
@@ -157,7 +173,6 @@ function NavButton({
           : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"
       )}
     >
-      {/* Active background */}
       {isActive && (
         <span
           className="absolute inset-0 rounded-xl transition-colors duration-200"
@@ -165,7 +180,6 @@ function NavButton({
         />
       )}
 
-      {/* Active left accent */}
       {isActive && !collapsed && (
         <span
           className="absolute left-0 top-1/2 -translate-y-1/2 h-[18px] w-[3px] rounded-r-full"
@@ -280,12 +294,32 @@ function SidebarContent({
   navigate: (page: PageView) => void;
   collapsed: boolean;
   primaryColor: string;
-  user: { username?: string; role?: string } | null;
+  user: { username?: string; role?: string; roles?: string[] } | null;
 }) {
+  const userRoles = user?.roles ?? [];
+  const isAdmin = user?.role === "Admin" || userRoles.includes("ADMIN") || userRoles.includes("Admin");
+  const isBursar = Array.isArray(userRoles) && (userRoles.includes("BURSAR") || userRoles.includes("Bursar"));
+  const isClassTeacher = Array.isArray(userRoles) && (userRoles.includes("CLASS_TEACHER") || userRoles.includes("Class_Teacher"));
+
+  // Remove default Finance group if user is a Bursar
+  const filteredGroups = NAV_GROUPS.filter(
+    (g) => !(g.title === "Finance" && isBursar)
+  );
+
+  // Build role-based sections
+  const roleSections: NavGroup[] = [];
+  if (isAdmin) roleSections.push({ title: "Admin", items: ADMIN_ITEMS });
+  if (isBursar) roleSections.push({ title: "Finance", items: BURSAR_ITEMS });
+  if (isClassTeacher) roleSections.push({ title: "Class Teacher", items: CLASS_TEACHER_ITEMS });
+
+  // Insert role sections after "Records" (index 3)
+  const allGroups = [...filteredGroups];
+  allGroups.splice(3, 0, ...roleSections);
+
   return (
     <ScrollArea className="h-full px-3 py-2">
       <div className="space-y-0.5">
-        {NAV_GROUPS.map((group) => (
+        {allGroups.map((group) => (
           <NavGroupSection
             key={group.title}
             group={group}
@@ -295,36 +329,6 @@ function SidebarContent({
             primaryColor={primaryColor}
           />
         ))}
-
-        {/* Admin section */}
-        {user?.role === "Admin" && (
-          <>
-            <div className="mx-2 my-4 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-            <div className="mb-1">
-              {!collapsed && (
-                <div className="flex items-center gap-2 px-3 pb-1.5">
-                  <Shield
-                    className="size-3 text-slate-500"
-                    style={{ color: primaryColor, opacity: 0.6 }}
-                  />
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 select-none">
-                    Admin
-                  </p>
-                </div>
-              )}
-              {ADMIN_ITEMS.map((item) => (
-                <NavButton
-                  key={item.label}
-                  item={item}
-                  isActive={currentPage === item.page}
-                  onClick={() => navigate(item.page)}
-                  collapsed={collapsed}
-                  primaryColor={primaryColor}
-                />
-              ))}
-            </div>
-          </>
-        )}
       </div>
     </ScrollArea>
   );
@@ -366,7 +370,6 @@ export function Sidebar() {
   /* ─── Branding Header ─── */
   const brandingHeader = (
     <div className="relative flex h-16 items-center gap-3 px-4 shrink-0">
-      {/* Top accent line */}
       <span
         className="absolute left-0 right-0 top-0 h-[2px]"
         style={{
@@ -374,7 +377,6 @@ export function Sidebar() {
         }}
       />
 
-      {/* Logo */}
       <div
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-lg transition-transform duration-200 hover:scale-105"
         style={{
@@ -393,7 +395,6 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* School name */}
       {!collapsed && (
         <div className="flex-1 overflow-hidden">
           <p className="truncate text-[13px] font-bold tracking-wide text-white">
@@ -405,7 +406,6 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Desktop collapse toggle */}
       {sidebarOpen && (
         <button
           onClick={toggleSidebar}
@@ -420,7 +420,6 @@ export function Sidebar() {
   /* ─── User Profile Footer ─── */
   const profileFooter = (
     <div className="shrink-0 border-t border-white/[0.06] p-3 space-y-1">
-      {/* User info */}
       {!collapsed && (
         <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-white/[0.03]">
           <div
@@ -444,7 +443,6 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Logout */}
       {collapsed ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -469,7 +467,6 @@ export function Sidebar() {
         </button>
       )}
 
-      {/* Expand button (collapsed only) */}
       {collapsed && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -486,7 +483,6 @@ export function Sidebar() {
         </Tooltip>
       )}
 
-      {/* Copyright */}
       {!collapsed && (
         <p className="text-center text-[10px] font-medium text-slate-600 pt-1">
           &copy; {new Date().getFullYear()} {schoolName}
@@ -501,7 +497,6 @@ export function Sidebar() {
   if (isMobile) {
     return (
       <>
-        {/* Floating hamburger */}
         {!sidebarOpen && (
           <button
             onClick={() => setSidebarOpen(true)}

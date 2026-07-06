@@ -1,28 +1,47 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Chyksys - Complete School Management",
-  description: "Multi-tenant school management system for managing students, results, admissions, and more",
+  title: "Chyksys Everything Your School Needs. One Simple Platform.",
+  description:
+    "Chyksys helps Nigerian schools manage student records, automate result computation, track school fees, monitor attendance, prepare lesson notes with AI, and streamline daily operations — all from one secure, easy-to-use platform.",
+  keywords: [
+    "Chyksys",
+    "school management software",
+    "Nigeria",
+    "school administration",
+    "result computation",
+    "school fees",
+    "attendance tracking",
+    "AI lesson notes",
+    "report cards",
+    "school management system",
+  ],
+  authors: [{ name: "ChykeTech" }],
   icons: {
-    icon: [
-      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-16.png", sizes: "16x16", type: "image/png" },
-      { url: "/icon.svg", type: "image/svg+xml" },
-    ],
-    apple: "/icon.svg",
+    icon: "/logo.svg",
+  },
+  openGraph: {
+    title: "Chyksys Everything Your School Needs. One Simple Platform.",
+    description:
+      "Manage student records, automate results, track fees, monitor attendance, and prepare AI lesson notes — all from one platform.",
+    url: "https://chyksys.com",
+    siteName: "Chyksys",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Chyksys School Management Made Simple",
+    description:
+      "One platform for student records, results, fees, attendance, and AI lesson notes.",
   },
 };
 
@@ -33,17 +52,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
-        <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
-        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-        <link rel="apple-touch-icon" href="/icon.svg" />
-      </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
+      <body className={`${inter.variable} antialiased bg-background text-foreground`}>
         {children}
-        <Toaster richColors position="top-right" />
+        <Toaster />
       </body>
     </html>
   );

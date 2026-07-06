@@ -8,6 +8,14 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum SystemRole {
+  ADMIN
+  BURSAR
+  CLASS_TEACHER
+  SUBJECT_TEACHER
+  STAFF
+}
+
 model Tenant {
   id              String   @id @default(cuid())
   name            String
@@ -33,6 +41,7 @@ model Tenant {
   updatedAt       DateTime @updatedAt
 
   users            User[]
+  userRoles        UserRole[]
   students         Student[]
   teachers         Teacher[]
   subjects         Subject[]
@@ -111,7 +120,7 @@ model User {
   email     String
   password  String
   username  String
-  role      String   @default("Staff") // Admin, Staff, SuperAdmin, Student, Teacher, Parent
+  role      String   @default("Staff") // Kept for backward compat (primary role)
   imageUrl  String   @default("")
   studentId String?
   teacherId String?
@@ -121,8 +130,23 @@ model User {
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id])
   loginHistory LoginHistory[]
+  userRoles    UserRole[]   // NEW: flexible multi-role support
 
   @@unique([tenantId, email])
+}
+
+model UserRole {
+  id        String     @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      SystemRole
+  createdAt DateTime   @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role]) // prevent duplicate role assignments
+  @@index([tenantId])
 }
 
 model LoginHistory {

@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { UserCog, Plus, Pencil, Trash2, Search, Shield, ShieldAlert } from "lucide-react";
+import {
+  UserCog, Plus, Pencil, Trash2, Search,
+  Shield, ShieldAlert, GraduationCap, Wallet, BookOpen,
+} from "lucide-react";
 import { useAppStore } from "@/store/index";
 
 import { Button } from "@/components/ui/button";
@@ -10,13 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -44,11 +41,62 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// ─── Role definitions ───
+const ROLE_OPTIONS = [
+  {
+    value: "ADMIN",
+    label: "Admin",
+    description: "Full system access, manage users & settings",
+    icon: Shield,
+    color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  },
+  {
+    value: "BURSAR",
+    label: "Bursar",
+    description: "Manage fees, payments, and finances",
+    icon: Wallet,
+    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  },
+  {
+    value: "CLASS_TEACHER",
+    label: "Class Teacher",
+    description: "Manage assigned class students & attendance",
+    icon: GraduationCap,
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  },
+  {
+    value: "SUBJECT_TEACHER",
+    label: "Subject Teacher",
+    description: "Manage subjects, assignments & scores",
+    icon: BookOpen,
+    color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  },
+] as const;
+
+type RoleValue = (typeof ROLE_OPTIONS)[number]["value"];
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Admin",
+  BURSAR: "Bursar",
+  CLASS_TEACHER: "Class Teacher",
+  SUBJECT_TEACHER: "Subject Teacher",
+  STAFF: "Staff",
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  ADMIN: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  BURSAR: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  CLASS_TEACHER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  SUBJECT_TEACHER: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  STAFF: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+};
+
 interface UserRecord {
   id: string;
   email: string;
   username: string;
   role: string;
+  roles: string[];
   imageUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -67,7 +115,7 @@ export default function UserListView() {
   const [formUsername, setFormUsername] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formPassword, setFormPassword] = useState("");
-  const [formRole, setFormRole] = useState("Staff");
+  const [formRoles, setFormRoles] = useState<RoleValue[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   // Delete state
@@ -108,12 +156,21 @@ export default function UserListView() {
       u.email.toLowerCase().includes(debouncedSearch.toLowerCase())
   );
 
+  // Toggle a role in the checkbox group
+  const toggleRole = (roleValue: RoleValue) => {
+    setFormRoles((prev) =>
+      prev.includes(roleValue)
+        ? prev.filter((r) => r !== roleValue)
+        : [...prev, roleValue]
+    );
+  };
+
   const openAdd = () => {
     setEditingUser(null);
     setFormUsername("");
     setFormEmail("");
     setFormPassword("");
-    setFormRole("Staff");
+    setFormRoles([]);
     setDialogOpen(true);
   };
 
@@ -122,7 +179,15 @@ export default function UserListView() {
     setFormUsername(u.username);
     setFormEmail(u.email);
     setFormPassword("");
-    setFormRole(u.role);
+    // Map old single-role users to the new system
+    setFormRoles(
+      (u.roles && u.roles.length > 0
+        ? u.roles
+        : u.role === "Admin"
+          ? ["ADMIN"]
+          : []
+      ) as RoleValue[]
+    );
     setDialogOpen(true);
   };
 
@@ -145,10 +210,10 @@ export default function UserListView() {
     try {
       setSubmitting(true);
       const method = editingUser ? "PUT" : "POST";
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         username: trimmedUsername,
         email: trimmedEmail,
-        role: formRole,
+        roles: formRoles,
       };
 
       if (editingUser) {
@@ -187,7 +252,6 @@ export default function UserListView() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
 
-    // Prevent deleting yourself
     if (deleteTarget.id === user?.id) {
       toast.error("You cannot delete your own account");
       setDeleteTarget(null);
@@ -215,8 +279,13 @@ export default function UserListView() {
     }
   };
 
-  // Access denied
-  if (user && user.role !== "Admin") {
+  // Access denied — check both old role and new roles array
+  const hasAdminAccess =
+    user?.role === "Admin" ||
+    user?.roles?.includes("ADMIN") ||
+    user?.roles?.includes("Admin");
+
+  if (user && !hasAdminAccess) {
     return (
       <div className="flex flex-col items-center justify-center py-24 space-y-4">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
@@ -246,7 +315,7 @@ export default function UserListView() {
               User Management
             </h1>
             <p className="text-sm text-muted-foreground">
-              Manage system users and roles
+              Manage system users and assign multiple roles
             </p>
           </div>
         </div>
@@ -275,7 +344,7 @@ export default function UserListView() {
               <TableHead className="w-16">#</TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
+              <TableHead>Roles</TableHead>
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -293,7 +362,7 @@ export default function UserListView() {
                     <Skeleton className="h-4 w-48" />
                   </TableCell>
                   <TableCell>
-                    <Skeleton className="h-5 w-16" />
+                    <Skeleton className="h-5 w-40" />
                   </TableCell>
                   <TableCell className="text-right">
                     <Skeleton className="ml-auto h-8 w-20" />
@@ -318,16 +387,32 @@ export default function UserListView() {
                   <TableCell className="font-medium">{u.username}</TableCell>
                   <TableCell>{u.email}</TableCell>
                   <TableCell>
-                    {u.role === "Admin" ? (
-                      <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
-                        <Shield className="mr-1 h-3 w-3" />
-                        Admin
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                        Staff
-                      </Badge>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {(u.roles && u.roles.length > 0
+                        ? u.roles
+                        : u.role === "Admin"
+                          ? ["ADMIN"]
+                          : []
+                      ).map((r) => (
+                        <Badge
+                          key={r}
+                          variant="secondary"
+                          className={ROLE_COLORS[r] || ROLE_COLORS["STAFF"]}
+                        >
+                          {ROLE_LABELS[r] || r}
+                        </Badge>
+                      ))}
+                      {(!u.roles || u.roles.length === 0) &&
+                        u.role !== "Admin" && (
+                          <Badge
+                            variant="secondary"
+                            className={ROLE_COLORS[u.role] || ROLE_COLORS["STAFF"]}
+                          >
+                            {ROLE_LABELS[u.role] || u.role}
+                          </Badge>
+                        )}
+                      
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -351,11 +436,10 @@ export default function UserListView() {
                         }
                       >
                         <Trash2
-                          className={`h-4 w-4 ${
-                            u.id === user?.id
+                          className={`h-4 w-4 ${u.id === user?.id
                               ? "text-muted-foreground"
                               : "text-destructive"
-                          }`}
+                            }`}
                         />
                       </Button>
                     </div>
@@ -367,20 +451,21 @@ export default function UserListView() {
         </Table>
       </div>
 
-      {/* Add/Edit Dialog */}
+      {/* Add/Edit Dialog with Checkbox Roles */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>
               {editingUser ? "Edit User" : "Add User"}
             </DialogTitle>
             <DialogDescription>
               {editingUser
-                ? "Update the user details below."
-                : "Enter the details for the new user account."}
+                ? "Update the user details and role assignments below."
+                : "Enter the details for the new user account. You can assign multiple roles."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-5 py-2">
+            {/* Username */}
             <div className="space-y-2">
               <Label htmlFor="user-username">Username</Label>
               <Input
@@ -390,6 +475,8 @@ export default function UserListView() {
                 onChange={(e) => setFormUsername(e.target.value)}
               />
             </div>
+
+            {/* Email */}
             <div className="space-y-2">
               <Label htmlFor="user-email">Email</Label>
               <Input
@@ -400,6 +487,8 @@ export default function UserListView() {
                 onChange={(e) => setFormEmail(e.target.value)}
               />
             </div>
+
+            {/* Password */}
             <div className="space-y-2">
               <Label htmlFor="user-password">
                 Password{" "}
@@ -427,17 +516,55 @@ export default function UserListView() {
                 </p>
               )}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="user-role">Role</Label>
-              <Select value={formRole} onValueChange={setFormRole}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Staff">Staff</SelectItem>
-                </SelectContent>
-              </Select>
+
+            {/* Role Checkboxes */}
+            <div className="space-y-3">
+              <Label>Assign Roles</Label>
+              <p className="text-xs text-muted-foreground">
+                Select one or more roles for this user. Each role grants
+                access to different features.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {ROLE_OPTIONS.map((roleOption) => {
+                  const Icon = roleOption.icon;
+                  const isChecked = formRoles.includes(roleOption.value);
+                  return (
+                    <label
+                      key={roleOption.value}
+                      className={`
+                        flex items-start gap-3 rounded-lg border p-3 cursor-pointer
+                        transition-all duration-200
+                        ${isChecked
+                          ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                          : "border-border hover:border-primary/40 hover:bg-muted/50"
+                        }
+                      `}
+                    >
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={() => toggleRole(roleOption.value)}
+                        className="mt-0.5"
+                      />
+                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                        <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <div className="space-y-0.5">
+                          <span className="text-sm font-medium leading-none">
+                            {roleOption.label}
+                          </span>
+                          <p className="text-[11px] text-muted-foreground leading-tight">
+                            {roleOption.description}
+                          </p>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {formRoles.length === 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  No roles assigned — the user will have Staff-level access only.
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -452,8 +579,8 @@ export default function UserListView() {
               {submitting
                 ? "Saving..."
                 : editingUser
-                ? "Update User"
-                : "Add User"}
+                  ? "Update User"
+                  : "Add User"}
             </Button>
           </DialogFooter>
         </DialogContent>
