@@ -26,6 +26,7 @@ import {
   UserPlus,
   BookOpen,
   Menu,
+  UserCircle,
   Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -68,6 +69,12 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'AI Assistant', page: 'teacher-ai-assistant', icon: Sparkles },
       { label: 'Assignments', page: 'teacher-assignments', icon: ClipboardList },
       { label: 'Announcements', page: 'teacher-announcements', icon: Megaphone },
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      { label: 'Profile', page: 'teacher-profile', icon: UserCircle },
     ],
   },
 ]

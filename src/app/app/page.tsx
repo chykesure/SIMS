@@ -70,7 +70,7 @@ import SchoolProfilePage from "@/components/settings/school-profile";
 import ScoreImportPage from "@/components/settings/score-import";
 
 import { TeacherAiAssistant } from "@/components/teacher/teacher-ai-assistant";
-
+import ProfileView from "@/components/settings/profile-view";
 
 
 export default function Home() {
@@ -154,6 +154,8 @@ export default function Home() {
           return <SubjectListView />;
         case "teacher-ai-assistant":
           return <TeacherAiAssistant />;
+        case "teacher-profile":
+          return <ProfileView />;
         default:
           return <TeacherDashboard />;
       }
@@ -312,7 +314,7 @@ export default function Home() {
       case "classroom":
         return <ClassroomView />;
       case "profile":
-        return <DashboardView />;
+        return <ProfileView />;
       case "school-profile":
         return <SchoolProfilePage />;
       case "score-import":

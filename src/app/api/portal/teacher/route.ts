@@ -12,12 +12,46 @@ function getUserId(request: Request): string {
 // GET /api/portal/teacher — Teacher dashboard info
 export async function GET(request: Request) {
   try {
-    const tenantId = getTenantId(request);
-    const userId = getUserId(request);
+    let tenantId = getTenantId(request);
+    let userId = getUserId(request);
 
-    if (!tenantId || !userId) {
+    if (!userId) {
       return NextResponse.json(
-        { success: false, message: "Tenant ID and User ID required" },
+        { success: false, message: "User ID required" },
+        { status: 400 }
+      );
+    }
+
+    // Resolve impersonation: "impersonated-admin" → real teacher user
+    if (userId === "impersonated-admin") {
+      if (!tenantId) {
+        return NextResponse.json(
+          { success: false, message: "Tenant ID required for impersonation" },
+          { status: 400 }
+        );
+      }
+      const realUser = await db.user.findFirst({
+        where: { tenantId, role: { in: ["TEACHER", "Teacher", "teacher"] } },
+      });
+      if (realUser) {
+        userId = realUser.id;
+      }
+    }
+
+    // If tenantId not provided via header, get it from the user record
+    if (!tenantId) {
+      const foundUser = await db.user.findFirst({
+        where: { id: userId },
+        select: { tenantId: true },
+      });
+      if (foundUser) {
+        tenantId = foundUser.tenantId;
+      }
+    }
+
+    if (!tenantId) {
+      return NextResponse.json(
+        { success: false, message: "Could not determine tenant" },
         { status: 400 }
       );
     }

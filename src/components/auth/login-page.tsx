@@ -33,6 +33,9 @@ import {
   Wallet,
   KeyRound,
   AlertTriangle,
+  CheckCircle2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/store/index";
@@ -47,6 +50,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -281,6 +285,287 @@ function PasscodeDialog({ onSuccess, onClose }: { onSuccess: () => void; onClose
 }
 
 // ---------------------------------------------------------------------------
+// Forgot Password Dialog
+// ---------------------------------------------------------------------------
+
+function ForgotPasswordDialog({ onClose, onBackToLogin }: { onClose: () => void; onBackToLogin: () => void }) {
+  const [step, setStep] = useState<"email" | "code" | "success">("email");
+  const [email, setEmail] = useState("");
+  const [resetCode, setResetCode] = useState(["", "", "", "", "", ""]);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) { setError("Email is required"); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || "Failed to send reset code"); return; }
+      if (!data.found) {
+        setError("No account found with that email. Please check and try again.");
+        return;
+      }
+      setStep("code");
+    } catch {
+      setError("An error occurred. Please try again.");
+    } finally { setLoading(false); }
+  };
+
+  // Handle code input (auto-advance)
+  const handleCodeInput = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+    const newCodes = [...resetCode];
+    newCodes[index] = value.slice(-1);
+    setResetCode(newCodes);
+    setError("");
+    // Auto-focus next input
+    if (value && index < 5) {
+      const next = document.getElementById(`reset-code-${index + 1}`);
+      next?.focus();
+    }
+  };
+
+  const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === "Backspace" && !resetCode[index] && index > 0) {
+      const prev = document.getElementById(`reset-code-${index - 1}`);
+      prev?.focus();
+    }
+  };
+
+  // Handle paste
+  const handleCodePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (pasted.length === 6) {
+      const newCodes = pasted.split("");
+      setResetCode(newCodes);
+      setError("");
+      document.getElementById("reset-code-5")?.focus();
+    }
+  };
+
+  // Step 2: Verify code and reset password
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = resetCode.join("");
+    if (code.length !== 6) { setError("Please enter the full 6-digit code"); return; }
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match"); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify-reset-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), resetCode: code, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || "Failed to reset password"); return; }
+      setStep("success");
+    } catch {
+      setError("An error occurred. Please try again.");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50">
+              <KeyRound className="h-5 w-5 text-blue-600" />
+            </div>
+            {step === "email" && "Forgot Password"}
+            {step === "code" && "Enter Reset Code"}
+            {step === "success" && "Password Reset!"}
+          </DialogTitle>
+          <DialogDescription>
+            {step === "email" && "Enter your email to receive a password reset code."}
+            {step === "code" && "Enter the 6-digit code sent to your email."}
+            {step === "success" && "Your password has been updated successfully."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* STEP 1: Enter Email */}
+        {step === "email" && (
+          <form onSubmit={handleSendCode} className="mt-2 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="forgot-email">Email Address</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="Enter your recovery or login email"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                  required
+                  className="pl-10"
+                  autoFocus
+                />
+              </div>
+            </div>
+            {error && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
+                <p className="text-xs font-medium text-red-600">{error}</p>
+              </div>
+            )}
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={onBackToLogin} className="flex-1">Back</Button>
+              <Button
+                type="submit"
+                className="flex-1 text-white"
+                style={{ backgroundColor: "#C0522B" }}
+                disabled={loading}
+              >
+                {loading ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Sending...</> : "Send Reset Code"}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 2: Enter Code + New Password */}
+        {step === "code" && (
+          <form onSubmit={handleResetPassword} className="mt-2 space-y-4">
+            {/* Code input boxes */}
+            <div className="space-y-2">
+              <Label>6-Digit Reset Code</Label>
+              <div className="flex justify-center gap-2" onPaste={handleCodePaste}>
+                {resetCode.map((digit, i) => (
+                  <input
+                    key={i}
+                    id={`reset-code-${i}`}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleCodeInput(i, e.target.value)}
+                    onKeyDown={(e) => handleCodeKeyDown(i, e)}
+                    className="h-12 w-11 rounded-lg border-2 border-slate-200 bg-slate-50 text-center text-lg font-bold text-slate-900 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
+                    autoFocus={i === 0}
+                  />
+                ))}
+              </div>
+              <p className="text-center text-xs text-muted-foreground">
+                Check your email for the code. <button type="button" onClick={() => { setStep("email"); setResetCode(["", "", "", "", "", ""]); }} className="text-blue-600 hover:underline">Resend</button>
+              </p>
+            </div>
+
+            <div className="relative"><Separator /></div>
+
+            {/* New Password */}
+            <div className="space-y-2">
+              <Label htmlFor="forgot-new-password">New Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="forgot-new-password"
+                  type={showNew ? "text" : "password"}
+                  placeholder="Min 6 characters"
+                  value={newPassword}
+                  onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
+                  required
+                  minLength={6}
+                  className="pl-10 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNew(!showNew)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm Password */}
+            <div className="space-y-2">
+              <Label htmlFor="forgot-confirm-password">Confirm Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="forgot-confirm-password"
+                  type={showConfirm ? "text" : "password"}
+                  placeholder="Re-enter new password"
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
+                  required
+                  minLength={6}
+                  className={cn("pl-10 pr-10", confirmPassword && newPassword !== confirmPassword && "border-red-300 focus:border-red-500")}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(!showConfirm)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-xs text-destructive">Passwords do not match</p>
+              )}
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
+                <p className="text-xs font-medium text-red-600">{error}</p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setStep("email")} className="flex-1">Back</Button>
+              <Button
+                type="submit"
+                className="flex-1 text-white"
+                style={{ backgroundColor: "#C0522B" }}
+                disabled={loading}
+              >
+                {loading ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Resetting...</> : "Reset Password"}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* STEP 3: Success */}
+        {step === "success" && (
+          <div className="flex flex-col items-center gap-4 py-4">
+            <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100">
+              <CheckCircle2 className="size-9 text-emerald-600" />
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-semibold">Password Updated!</p>
+              <p className="mt-1 text-sm text-muted-foreground">You can now sign in with your new password.</p>
+            </div>
+            <Button
+              onClick={onBackToLogin}
+              className="mt-2 text-white"
+              style={{ backgroundColor: "#C0522B" }}
+            >
+              Back to Sign In
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Landing Page
 // ---------------------------------------------------------------------------
 
@@ -291,6 +576,7 @@ export default function LoginPage() {
   const navigate = useAppStore((s) => s.navigate);
 
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -517,10 +803,18 @@ export default function LoginPage() {
           </form>
           <div className="mt-4 flex items-center justify-between text-sm">
             <button type="button" onClick={() => { navigate("register"); setShowLoginModal(false); }} className="font-medium transition-colors hover:underline" style={{ color: "#C0522B" }}>Don&apos;t have an account?</button>
-            <button type="button" onClick={() => { navigate("admission"); setShowLoginModal(false); }} className="font-medium text-muted-foreground transition-colors hover:underline">Admission Portal</button>
+            <button type="button" onClick={() => { setShowLoginModal(false); setShowForgotPassword(true); }} className="font-medium text-muted-foreground transition-colors hover:underline">Forgot Password?</button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* FORGOT PASSWORD DIALOG */}
+      {showForgotPassword && (
+        <ForgotPasswordDialog
+          onClose={() => setShowForgotPassword(false)}
+          onBackToLogin={() => { setShowForgotPassword(false); setShowLoginModal(true); }}
+        />
+      )}
 
       {/* PASSCODE VERIFICATION */}
       {showPasscode && !showDevLogin && (<PasscodeDialog onSuccess={() => { setShowPasscode(false); setShowDevLogin(true); }} onClose={() => setShowPasscode(false)} />)}

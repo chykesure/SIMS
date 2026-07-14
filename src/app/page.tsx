@@ -37,7 +37,7 @@ export default function Home() {
         <Blog />
         <Resources />
       </main>
-      <Footer />
+      
     </div>
   )
 }

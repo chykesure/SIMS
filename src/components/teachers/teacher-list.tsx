@@ -57,6 +57,7 @@ interface Teacher {
   gender: string;
   phone: string;
   email: string;
+  recoveryEmail: string;
   address: string;
   active: string;
   imageUrl: string;
@@ -93,6 +94,8 @@ interface TeacherFormProps {
   setPhone: (v: string) => void;
   email: string;
   setEmail: (v: string) => void;
+  recoveryEmail: string;
+  setRecoveryEmail: (v: string) => void;
   address: string;
   setAddress: (v: string) => void;
   isActive: boolean;
@@ -110,6 +113,8 @@ function TeacherForm({
   setPhone,
   email,
   setEmail,
+  recoveryEmail,
+  setRecoveryEmail,
   address,
   setAddress,
   isActive,
@@ -167,16 +172,29 @@ function TeacherForm({
         </div>
       </div>
 
-      {/* Email */}
-      <div className="space-y-2">
-        <Label htmlFor="teacher-email">Email</Label>
-        <Input
-          id="teacher-email"
-          type="email"
-          placeholder="e.g. teacher@school.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+      {/* Email & Recovery Email */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="teacher-email">Login Email</Label>
+          <Input
+            id="teacher-email"
+            type="email"
+            placeholder="e.g. teacher@school.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="teacher-recovery-email">Recovery Email</Label>
+          <Input
+            id="teacher-recovery-email"
+            type="email"
+            placeholder="e.g. teacher@gmail.com"
+            value={recoveryEmail}
+            onChange={(e) => setRecoveryEmail(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">Used for password reset</p>
+        </div>
       </div>
 
       {/* Address */}
@@ -226,6 +244,7 @@ export default function TeacherListView() {
   const [addPhone, setAddPhone] = useState("");
   const [addEmail, setAddEmail] = useState("");
   const [addAddress, setAddAddress] = useState("");
+  const [addRecoveryEmail, setAddRecoveryEmail] = useState("");
   const [addIsActive, setAddIsActive] = useState(true);
 
   // Edit dialog state
@@ -240,6 +259,7 @@ export default function TeacherListView() {
   const [editPhone, setEditPhone] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [editRecoveryEmail, setEditRecoveryEmail] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
 
   // Delete dialog state
@@ -295,6 +315,7 @@ export default function TeacherListView() {
     setAddPhone("");
     setAddEmail("");
     setAddAddress("");
+    setAddRecoveryEmail("");
     setAddIsActive(true);
   }
 
@@ -307,6 +328,7 @@ export default function TeacherListView() {
     setEditPhone(teacher.phone);
     setEditEmail(teacher.email);
     setEditAddress(teacher.address);
+    setEditRecoveryEmail(teacher.recoveryEmail || "");
     setEditIsActive(teacher.active === "Yes");
     setEditOpen(true);
   }
@@ -331,6 +353,7 @@ export default function TeacherListView() {
           gender: addGender,
           phone: addPhone.trim(),
           email: addEmail.trim(),
+          recoveryEmail: addRecoveryEmail.trim(),
           address: addAddress.trim(),
           active: addIsActive ? "Yes" : "No",
         }),
@@ -385,6 +408,7 @@ export default function TeacherListView() {
           gender: editGender,
           phone: editPhone.trim(),
           email: editEmail.trim(),
+          recoveryEmail: editRecoveryEmail.trim(),
           address: editAddress.trim(),
           active: editIsActive ? "Yes" : "No",
         }),
@@ -719,6 +743,8 @@ export default function TeacherListView() {
               setPhone={setAddPhone}
               email={addEmail}
               setEmail={setAddEmail}
+              recoveryEmail={addRecoveryEmail}
+              setRecoveryEmail={setAddRecoveryEmail}
               address={addAddress}
               setAddress={setAddAddress}
               isActive={addIsActive}
@@ -775,6 +801,8 @@ export default function TeacherListView() {
               setPhone={setEditPhone}
               email={editEmail}
               setEmail={setEditEmail}
+              recoveryEmail={editRecoveryEmail}
+              setRecoveryEmail={setEditRecoveryEmail}
               address={editAddress}
               setAddress={setEditAddress}
               isActive={editIsActive}

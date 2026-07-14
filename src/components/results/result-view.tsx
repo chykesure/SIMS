@@ -944,26 +944,36 @@ export default function ResultView() {
       </td>
     );
   }
-
   /* ===== SMART CUMULATIVE SUMMARY VALUES ===== */
-  // Sum cumulative totals across all subjects for the current student
   let cumGrandTotal = 0;
   let cumGrandAvg = 0;
-  const termsUsedCount = cumulativeInfo?.maxAvailableTerms || (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
+  // FIX: Track actual terms used for THIS student (not global class max)
+  let studentActualTermsUsed = 0;
 
   if (isCumulative) {
     let totalCumSum = 0;
     let subjectsWithCumData = 0;
+    // FIX: Use a Set to track how many terms THIS student actually has data for
+    const studentTermsSet = new Set<number>();
+
     for (const sc of reportScores) {
       const stuCum = getStudentCumForSubject(sc.subject);
       if (stuCum && stuCum.cumulativeAvg > 0) {
         totalCumSum += stuCum.cumulativeAvg;
         subjectsWithCumData++;
-      } else if (!isCumulative) {
-        totalCumSum += sc.total || 0;
-        subjectsWithCumData++;
+
+        // Track which terms this student has across all subjects
+        if (stuCum.termScores) {
+          for (const [termKey] of Object.entries(stuCum.termScores)) {
+            studentTermsSet.add(Number(termKey));
+          }
+        }
       }
     }
+
+    // FIX: Use the student's actual term count for the label
+    studentActualTermsUsed = studentTermsSet.size || (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
+
     cumGrandTotal = parseFloat(reportScores.reduce((s, sc) => {
       const stuCum = getStudentCumForSubject(sc.subject);
       return s + (stuCum?.cumulativeTotal ?? sc.total);
@@ -973,9 +983,13 @@ export default function ResultView() {
       : 0;
   }
 
+  // FIX: Use per-student term count instead of global max
+  const termsUsedCount = isCumulative
+    ? studentActualTermsUsed
+    : (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
+
   const displayTotalScore = parseFloat((isCumulative ? cumGrandTotal : studentTotalFromScores).toFixed(1));
   const displayAverage = isCumulative && cumGrandAvg > 0 ? cumGrandAvg : (reportStudent?.average ?? 0);
-
   /* ===== PASSED / FAILED COUNTS ===== */
   const reportPassedCount = reportScores.filter((sc) => {
     if (isCumulative) {

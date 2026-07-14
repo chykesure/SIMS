@@ -125,6 +125,9 @@ model User {
   studentId String?
   teacherId String?
   parentId  String?
+  resetCode String?
+  resetCodeExpiry  DateTime?
+  recoveryEmail    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -199,6 +202,7 @@ model Teacher {
   address   String   @default("")
   active    String   @default("Yes")
   imageUrl  String   @default("")
+  recoveryEmail String   @default("")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

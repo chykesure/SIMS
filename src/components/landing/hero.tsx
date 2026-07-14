@@ -48,14 +48,6 @@ export function Hero() {
             <div className="mt-8 flex flex-col gap-4 sm:flex-row">
               <a href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer">
                 <Button
-                  size="lg"
-                  className="rounded-full bg-burnt-orange px-8 text-base font-semibold text-white hover:bg-burnt-orange/90"
-                >
-                  Schedule a Free School Digitization Session
-                </Button>
-              </a>
-              <a href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer">
-                <Button
                   variant="outline"
                   size="lg"
                   className="rounded-full border-deep-navy/20 px-8 text-base font-semibold text-deep-navy hover:bg-deep-navy/5"

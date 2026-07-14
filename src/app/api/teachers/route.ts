@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
         { fullname: { contains: q } },
         { subject: { contains: q } },
         { email: { contains: q } },
+        { recoveryEmail: { contains: q } },
         { phone: { contains: q } },
       ];
     }
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
   try {
     const tenantId = getTenantId(request);
     const body = await request.json();
-    const { fullname, subject, gender, phone, email, address } = body;
+    const { fullname, subject, gender, phone, email, recoveryEmail, address } = body;
 
     if (!fullname?.trim()) {
       return NextResponse.json(
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
         gender: gender?.trim() || "",
         phone: phone?.trim() || "",
         email: teacherEmail,
+        recoveryEmail: recoveryEmail?.trim() || "",
         address: address?.trim() || "",
         active: "Yes",
         imageUrl: "",
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
           password: defaultPassword,
           role: "Teacher",
           teacherId: teacher.id,
+          recoveryEmail: recoveryEmail?.trim() || "",
           imageUrl: "",
         },
       });
@@ -122,7 +125,7 @@ export async function PUT(request: NextRequest) {
   try {
     const tenantId = getTenantId(request);
     const body = await request.json();
-    const { id, fullname, subject, gender, phone, email, address, active } = body;
+    const { id, fullname, subject, gender, phone, email, recoveryEmail, address, active } = body;
 
     if (!id?.trim()) {
       return NextResponse.json(
@@ -147,10 +150,19 @@ export async function PUT(request: NextRequest) {
         gender: gender?.trim() ?? existing.gender,
         phone: phone?.trim() ?? existing.phone,
         email: email?.trim() ?? existing.email,
+        recoveryEmail: recoveryEmail?.trim() ?? existing.recoveryEmail,
         address: address?.trim() ?? existing.address,
         active: active ?? existing.active,
       },
     });
+
+    // Also update recovery email on the linked User account
+    if (recoveryEmail !== undefined) {
+      await db.user.updateMany({
+        where: { teacherId: id, tenantId },
+        data: { recoveryEmail: recoveryEmail.trim() },
+      });
+    }
 
     return NextResponse.json(
       { success: true, message: "Teacher updated successfully", data: teacher },
