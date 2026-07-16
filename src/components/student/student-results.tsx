@@ -1,3 +1,4 @@
+//src/components/student/student-result.tsx
 'use client'
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
@@ -422,17 +423,10 @@ export function StudentResults() {
   /* ======== DYNAMIC CA COLUMNS ======== */
   const caCount = schoolSettings.caCount || 1
 
-  const caLabels = useMemo(() => {
-    const labels: string[] = []
-    const startIdx = 3 - caCount
-    for (let i = 0; i < caCount; i++) {
-      const fieldIdx = startIdx + i
-      if (fieldIdx === 0) labels.push(schoolSettings.ca1Label)
-      else if (fieldIdx === 1) labels.push(schoolSettings.ca2Label)
-      else labels.push(schoolSettings.ca3Label)
-    }
-    return labels
-  }, [caCount, schoolSettings])
+   const caLabels = useMemo(() => {
+    if (caCount === 1) return ["CA"]
+    return Array.from({ length: caCount }, (_, i) => `CA${i + 1}`)
+  }, [caCount])
 
   /* ======== REPORT CARD ======== */
   const openReportCard = () => {

@@ -96,6 +96,7 @@ export function TeacherScores() {
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [assessment, setAssessment] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT)
 
+  // Filters
   const [selectedSession, setSelectedSession] = useState('')
   const [selectedTerm, setSelectedTerm] = useState('')
   const [selectedClass, setSelectedClass] = useState('')
@@ -104,6 +105,7 @@ export function TeacherScores() {
 
   const primaryColor = tenant?.primaryColor || '#821329'
 
+  // Build dynamic CA columns based on assessment settings
   const caColumns = useMemo(() => {
     const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = [
       { field: 'firstCa', label: assessment.ca1Label, max: assessment.ca1Max },
@@ -276,22 +278,30 @@ export function TeacherScores() {
     fetchExistingScores(classTitle, students)
   }, [selectedSubject, selectedTerm, selectedSession])
 
+  const computeTotal = (row: ScoreRow, changedField?: string, newVal?: number) => {
+    const f = changedField
+    const v = newVal ?? 0
+    return (
+      (f === 'firstCa' ? v : row.firstCa) +
+      (f === 'secondCa' ? v : row.secondCa) +
+      (f === 'thirdCa' ? v : row.thirdCa) +
+      (f === 'exam' ? v : row.exam)
+    )
+  }
+
   const handleScoreChange = (
     index: number,
     field: 'firstCa' | 'secondCa' | 'thirdCa' | 'exam',
-    value: string
+    value: string,
+    max: number
   ) => {
-    const numVal = Math.max(0, Math.min(100, Number(value) || 0))
+    const numVal = Math.max(0, Math.min(max, Number(value) || 0))
     setScores((prev) => {
       const updated = [...prev]
       updated[index] = {
         ...updated[index],
         [field]: numVal,
-        total:
-          (field === 'firstCa' ? numVal : updated[index].firstCa) +
-          (field === 'secondCa' ? numVal : updated[index].secondCa) +
-          (field === 'thirdCa' ? numVal : updated[index].thirdCa) +
-          (field === 'exam' ? numVal : updated[index].exam),
+        total: computeTotal(updated[index], field, numVal),
       }
       return updated
     })
@@ -362,6 +372,7 @@ export function TeacherScores() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
+      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Score Entry</h1>
@@ -386,6 +397,7 @@ export function TeacherScores() {
         )}
       </div>
 
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -455,6 +467,7 @@ export function TeacherScores() {
         </CardContent>
       </Card>
 
+      {/* Score table */}
       {selectedClass && selectedSubject ? (
         loadingStudents ? (
           <Card>
@@ -536,8 +549,14 @@ export function TeacherScores() {
                               max={col.max}
                               value={row[col.field] || ''}
                               onChange={(e) =>
-                                handleScoreChange(row._index!, col.field, e.target.value)
+                                handleScoreChange(row._index!, col.field, e.target.value, col.max)
                               }
+                              onBlur={(e) => {
+                                const v = Number(e.target.value) || 0
+                                if (v > col.max) {
+                                  handleScoreChange(row._index!, col.field, String(col.max), col.max)
+                                }
+                              }}
                               placeholder="0"
                               className="h-8 w-20 text-center text-sm"
                             />
@@ -550,8 +569,14 @@ export function TeacherScores() {
                             max={assessment.examMax}
                             value={row.exam || ''}
                             onChange={(e) =>
-                              handleScoreChange(row._index!, 'exam', e.target.value)
+                              handleScoreChange(row._index!, 'exam', e.target.value, assessment.examMax)
                             }
+                            onBlur={(e) => {
+                              const v = Number(e.target.value) || 0
+                              if (v > assessment.examMax) {
+                                handleScoreChange(row._index!, 'exam', String(assessment.examMax), assessment.examMax)
+                              }
+                            }}
                             placeholder="0"
                             className="h-8 w-20 text-center text-sm"
                           />

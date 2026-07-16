@@ -907,9 +907,13 @@ export default function ResultView() {
     const startIdx = 3 - caCount; // 1->2, 2->1, 3->0
     for (let i = 0; i < caCount; i++) {
       const fieldIdx = startIdx + i;
-      if (fieldIdx === 0) cols.push({ label: schoolSettings.ca1Label, maxScore: schoolSettings.ca1Max });
-      else if (fieldIdx === 1) cols.push({ label: schoolSettings.ca2Label, maxScore: schoolSettings.ca2Max });
-      else cols.push({ label: schoolSettings.ca3Label, maxScore: schoolSettings.ca3Max });
+      let maxScore: number;
+      if (fieldIdx === 0) maxScore = schoolSettings.ca1Max;
+      else if (fieldIdx === 1) maxScore = schoolSettings.ca2Max;
+      else maxScore = schoolSettings.ca3Max;
+      // Generate label based on visible column count, not stored field name
+      const label = caCount === 1 ? "CA" : `CA${i + 1}`;
+      cols.push({ label, maxScore });
     }
     return cols;
   }, [caCount, schoolSettings]);
@@ -923,16 +927,16 @@ export default function ResultView() {
 
   const columnTotals_calc = reportScores.length > 0
     ? (() => {
-        const caTotals: number[] = new Array(caCount).fill(0);
-        reportScores.forEach((sc) => {
-          const mapped = mapCaScores(sc, caCount);
-          mapped.forEach((val, i) => { caTotals[i] += val || 0; });
-        });
-        return {
-          caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
-          examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
-        };
-      })()
+      const caTotals: number[] = new Array(caCount).fill(0);
+      reportScores.forEach((sc) => {
+        const mapped = mapCaScores(sc, caCount);
+        mapped.forEach((val, i) => { caTotals[i] += val || 0; });
+      });
+      return {
+        caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
+        examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
+      };
+    })()
     : { caTotals: new Array(caCount).fill(0) as number[], examTotal: 0 };
 
   const studentTotalFromScores = parseFloat(reportScores.reduce((s, e) => s + (e.total || 0), 0).toFixed(1));

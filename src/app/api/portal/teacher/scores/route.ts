@@ -9,6 +9,22 @@ function getUserId(request: Request): string {
   return request.headers.get("x-user-id") || "";
 }
 
+async function getSchoolSettings(tenantId: string) {
+  try {
+    const settings = await db.schoolSettings.findFirst({
+      where: { tenantId },
+    });
+    return settings || null;
+  } catch {
+    return null;
+  }
+}
+
+function clampScore(value: number, max: number): number {
+  const num = Number(value) || 0;
+  return Math.max(0, Math.min(max, Math.round(num * 100) / 100));
+}
+
 // GET /api/portal/teacher/scores?session=xxx&term=xxx&class=xxx&subject=xxx
 export async function GET(request: Request) {
   try {
@@ -70,12 +86,26 @@ export async function POST(request: Request) {
       );
     }
 
+    // Fetch school settings for score validation
+    const settings = await getSchoolSettings(tenantId);
+    const ca1Max = settings?.ca1Max || 20;
+    const ca2Max = settings?.ca2Max || 20;
+    const ca3Max = settings?.ca3Max || 10;
+    const examMax = settings?.examMax || 60;
+
     let created = 0;
     let updated = 0;
 
     for (const scoreData of scores) {
       const { fullname, firstCa, secondCa, thirdCa, exam } = scoreData;
-      const total = (Number(firstCa) || 0) + (Number(secondCa) || 0) + (Number(thirdCa) || 0) + (Number(exam) || 0);
+
+      // Validate and clamp each score field to its configured maximum
+      const validFirstCa = clampScore(firstCa, ca1Max);
+      const validSecondCa = clampScore(secondCa, ca2Max);
+      const validThirdCa = clampScore(thirdCa, ca3Max);
+      const validExam = clampScore(exam, examMax);
+
+      const total = validFirstCa + validSecondCa + validThirdCa + validExam;
 
       // Check for existing score
       const existing = await db.examScore.findFirst({
@@ -93,10 +123,10 @@ export async function POST(request: Request) {
         await db.examScore.update({
           where: { id: existing.id },
           data: {
-            firstCa: Number(firstCa) || 0,
-            secondCa: Number(secondCa) || 0,
-            thirdCa: Number(thirdCa) || 0,
-            exam: Number(exam) || 0,
+            firstCa: validFirstCa,
+            secondCa: validSecondCa,
+            thirdCa: validThirdCa,
+            exam: validExam,
             total,
           },
         });
@@ -110,10 +140,10 @@ export async function POST(request: Request) {
             term,
             fullname,
             subject,
-            firstCa: Number(firstCa) || 0,
-            secondCa: Number(secondCa) || 0,
-            thirdCa: Number(thirdCa) || 0,
-            exam: Number(exam) || 0,
+            firstCa: validFirstCa,
+            secondCa: validSecondCa,
+            thirdCa: validThirdCa,
+            exam: validExam,
             total,
           },
         });
