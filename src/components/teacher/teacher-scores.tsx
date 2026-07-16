@@ -17,10 +17,8 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   FileEdit,
-  AlertCircle,
   Save,
   Loader2,
-  CheckCircle,
   Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -59,6 +57,31 @@ interface ScoreRow {
   thirdCa: number
   exam: number
   total: number
+  [key: string]: string | number
+}
+
+interface AssessmentConfig {
+  caCount: number
+  ca1Label: string
+  ca1Max: number
+  ca2Label: string
+  ca2Max: number
+  ca3Label: string
+  ca3Max: number
+  examLabel: string
+  examMax: number
+}
+
+const DEFAULT_ASSESSMENT: AssessmentConfig = {
+  caCount: 2,
+  ca1Label: '1st CA',
+  ca1Max: 20,
+  ca2Label: '2nd CA',
+  ca2Max: 20,
+  ca3Label: '3rd CA',
+  ca3Max: 10,
+  examLabel: 'Exam',
+  examMax: 60,
 }
 
 export function TeacherScores() {
@@ -71,8 +94,8 @@ export function TeacherScores() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [loadingStudents, setLoadingStudents] = useState(false)
+  const [assessment, setAssessment] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT)
 
-  // Filters
   const [selectedSession, setSelectedSession] = useState('')
   const [selectedTerm, setSelectedTerm] = useState('')
   const [selectedClass, setSelectedClass] = useState('')
@@ -81,9 +104,47 @@ export function TeacherScores() {
 
   const primaryColor = tenant?.primaryColor || '#821329'
 
+  const caColumns = useMemo(() => {
+    const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = [
+      { field: 'firstCa', label: assessment.ca1Label, max: assessment.ca1Max },
+    ]
+    if (assessment.caCount >= 2) {
+      cols.push({ field: 'secondCa', label: assessment.ca2Label, max: assessment.ca2Max })
+    }
+    if (assessment.caCount >= 3) {
+      cols.push({ field: 'thirdCa', label: assessment.ca3Label, max: assessment.ca3Max })
+    }
+    return cols
+  }, [assessment])
+
   useEffect(() => {
     fetchDropdowns()
+    fetchAssessmentSettings()
   }, [])
+
+  const fetchAssessmentSettings = async () => {
+    try {
+      const res = await fetch('/api/settings?type=school-settings')
+      if (res.ok) {
+        const data = await res.json()
+        if (data && data.caCount) {
+          setAssessment({
+            caCount: data.caCount,
+            ca1Label: data.ca1Label || '1st CA',
+            ca1Max: data.ca1Max || 20,
+            ca2Label: data.ca2Label || '2nd CA',
+            ca2Max: data.ca2Max || 20,
+            ca3Label: data.ca3Label || '3rd CA',
+            ca3Max: data.ca3Max || 10,
+            examLabel: data.examLabel || 'Exam',
+            examMax: data.examMax || 60,
+          })
+        }
+      }
+    } catch {
+      // use defaults
+    }
+  }
 
   const fetchDropdowns = async () => {
     try {
@@ -132,6 +193,16 @@ export function TeacherScores() {
     setSelectedTerm('First Term')
   }, [selectedSession])
 
+  const makeEmptyScore = (s: StudentInfo): ScoreRow => ({
+    fullname: s.fullname,
+    studentId: s.id,
+    firstCa: 0,
+    secondCa: 0,
+    thirdCa: 0,
+    exam: 0,
+    total: 0,
+  })
+
   const fetchStudents = async () => {
     if (!selectedClass) {
       setStudents([])
@@ -146,22 +217,10 @@ export function TeacherScores() {
       const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
       setStudents(studentData)
 
-      // If subject and session/term are selected, fetch existing scores
       if (selectedSubject && sessionDisplay && selectedTerm) {
         fetchExistingScores(classTitle, studentData)
       } else {
-        // Initialize empty scores
-        setScores(
-          studentData.map((s) => ({
-            fullname: s.fullname,
-            studentId: s.id,
-            firstCa: 0,
-            secondCa: 0,
-            thirdCa: 0,
-            exam: 0,
-            total: 0,
-          }))
-        )
+        setScores(studentData.map(makeEmptyScore))
       }
     } catch {
       toast.error('Failed to load students')
@@ -203,26 +262,14 @@ export function TeacherScores() {
         })
       )
     } catch {
-      setScores(
-        studentData.map((s) => ({
-          fullname: s.fullname,
-          studentId: s.id,
-          firstCa: 0,
-          secondCa: 0,
-          thirdCa: 0,
-          exam: 0,
-          total: 0,
-        }))
-      )
+      setScores(studentData.map(makeEmptyScore))
     }
   }
 
-  // Fetch students when class changes
   useEffect(() => {
     fetchStudents()
   }, [selectedClass])
 
-  // Re-fetch existing scores when subject/term/session changes (and students are loaded)
   useEffect(() => {
     if (!selectedClass || !selectedSubject || students.length === 0) return
     const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
@@ -315,7 +362,6 @@ export function TeacherScores() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Score Entry</h1>
@@ -340,7 +386,6 @@ export function TeacherScores() {
         )}
       </div>
 
-      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -410,7 +455,6 @@ export function TeacherScores() {
         </CardContent>
       </Card>
 
-      {/* Score table */}
       {selectedClass && selectedSubject ? (
         loadingStudents ? (
           <Card>
@@ -458,10 +502,20 @@ export function TeacherScores() {
                     <TableRow>
                       <TableHead className="w-10 text-center">#</TableHead>
                       <TableHead className="min-w-[180px]">Student Name</TableHead>
-                      <TableHead className="w-24 text-center">1st CA</TableHead>
-                      <TableHead className="w-24 text-center">2nd CA</TableHead>
-                      <TableHead className="w-24 text-center">3rd CA</TableHead>
-                      <TableHead className="w-24 text-center">Exam</TableHead>
+                      {caColumns.map((col) => (
+                        <TableHead key={col.field} className="w-24 text-center">
+                          {col.label}
+                          <span className="block text-[10px] font-normal text-muted-foreground">
+                            max {col.max}
+                          </span>
+                        </TableHead>
+                      ))}
+                      <TableHead className="w-24 text-center">
+                        {assessment.examLabel}
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          max {assessment.examMax}
+                        </span>
+                      </TableHead>
                       <TableHead className="w-24 text-center font-bold">Total</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -474,23 +528,34 @@ export function TeacherScores() {
                         <TableCell className="font-medium text-sm">
                           {row.fullname}
                         </TableCell>
-                        {(['firstCa', 'secondCa', 'thirdCa', 'exam'] as const).map(
-                          (field) => (
-                            <TableCell key={field} className="p-1">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={row[field] || ''}
-                                onChange={(e) =>
-                                  handleScoreChange(row._index!, field, e.target.value)
-                                }
-                                placeholder="0"
-                                className="h-8 w-20 text-center text-sm"
-                              />
-                            </TableCell>
-                          )
-                        )}
+                        {caColumns.map((col) => (
+                          <TableCell key={col.field} className="p-1">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={col.max}
+                              value={row[col.field] || ''}
+                              onChange={(e) =>
+                                handleScoreChange(row._index!, col.field, e.target.value)
+                              }
+                              placeholder="0"
+                              className="h-8 w-20 text-center text-sm"
+                            />
+                          </TableCell>
+                        ))}
+                        <TableCell className="p-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={assessment.examMax}
+                            value={row.exam || ''}
+                            onChange={(e) =>
+                              handleScoreChange(row._index!, 'exam', e.target.value)
+                            }
+                            placeholder="0"
+                            className="h-8 w-20 text-center text-sm"
+                          />
+                        </TableCell>
                         <TableCell className="text-center">
                           <span
                             className={cn(

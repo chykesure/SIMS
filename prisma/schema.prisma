@@ -11,6 +11,7 @@ datasource db {
 enum SystemRole {
   ADMIN
   BURSAR
+  TEACHER
   CLASS_TEACHER
   SUBJECT_TEACHER
   STAFF

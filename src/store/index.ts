@@ -64,6 +64,7 @@ export type PageView =
   | "teacher-ai-assistant"
   | "teacher-subjects"
   | "teacher-profile"
+  | "teacher-results"
   | "attendance";
 
 const VALID_PAGES = new Set<string>([
@@ -81,7 +82,7 @@ const VALID_PAGES = new Set<string>([
   "teacher-announcements", "parent-dashboard", "parent-results",
   "parent-fees", "parent-announcements", "admission-list", "exam-score-entry",
   "teacher-announcements", "teacher-add-student", "teacher-students",
-  "teacher-subjects", "teacher-profile", "teacher-ai-assistant", "parent-dashboard", "parent-results",
+  "teacher-subjects", "teacher-profile", "teacher-ai-assistant", "parent-dashboard", "parent-results", "teacher-results",
 ]);
 
 interface User {

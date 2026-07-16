@@ -156,6 +156,8 @@ export default function Home() {
           return <TeacherAiAssistant />;
         case "teacher-profile":
           return <ProfileView />;
+        case "teacher-results":
+          return <ResultView />;
         default:
           return <TeacherDashboard />;
       }

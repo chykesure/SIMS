@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import {
   UserCog, Plus, Pencil, Trash2, Search,
-  Shield, ShieldAlert, GraduationCap, Wallet, BookOpen,
+  Shield, ShieldAlert, GraduationCap, Wallet, BookOpen, Users,
 } from "lucide-react";
 import { useAppStore } from "@/store/index";
 
@@ -58,6 +58,13 @@ const ROLE_OPTIONS = [
     color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   },
   {
+    value: "TEACHER",
+    label: "Teacher",
+    description: "General teacher access (portal, results view)",
+    icon: Users,
+    color: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
+  },
+  {
     value: "CLASS_TEACHER",
     label: "Class Teacher",
     description: "Manage assigned class students & attendance",
@@ -78,6 +85,7 @@ type RoleValue = (typeof ROLE_OPTIONS)[number]["value"];
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Admin",
   BURSAR: "Bursar",
+  TEACHER: "Teacher",
   CLASS_TEACHER: "Class Teacher",
   SUBJECT_TEACHER: "Subject Teacher",
   STAFF: "Staff",
@@ -86,6 +94,7 @@ const ROLE_LABELS: Record<string, string> = {
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
   BURSAR: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  TEACHER: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
   CLASS_TEACHER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   SUBJECT_TEACHER: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
   STAFF: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
@@ -180,12 +189,20 @@ export default function UserListView() {
     setFormEmail(u.email);
     setFormPassword("");
     // Map old single-role users to the new system
+    const oldRoleMap: Record<string, string[]> = {
+      Admin: ["ADMIN"],
+      Bursar: ["BURSAR"],
+      Teacher: ["TEACHER"],
+      ClassTeacher: ["CLASS_TEACHER"],
+      "Class Teacher": ["CLASS_TEACHER"],
+      SubjectTeacher: ["SUBJECT_TEACHER"],
+      "Subject Teacher": ["SUBJECT_TEACHER"],
+      Staff: [],
+    };
     setFormRoles(
       (u.roles && u.roles.length > 0
         ? u.roles
-        : u.role === "Admin"
-          ? ["ADMIN"]
-          : []
+        : oldRoleMap[u.role] || []
       ) as RoleValue[]
     );
     setDialogOpen(true);
@@ -392,7 +409,15 @@ export default function UserListView() {
                         ? u.roles
                         : u.role === "Admin"
                           ? ["ADMIN"]
-                          : []
+                          : u.role === "Teacher"
+                            ? ["TEACHER"]
+                            : u.role === "Bursar"
+                              ? ["BURSAR"]
+                              : u.role === "ClassTeacher" || u.role === "Class Teacher"
+                                ? ["CLASS_TEACHER"]
+                                : u.role === "SubjectTeacher" || u.role === "Subject Teacher"
+                                  ? ["SUBJECT_TEACHER"]
+                                  : []
                       ).map((r) => (
                         <Badge
                           key={r}
@@ -403,7 +428,13 @@ export default function UserListView() {
                         </Badge>
                       ))}
                       {(!u.roles || u.roles.length === 0) &&
-                        u.role !== "Admin" && (
+                        u.role !== "Admin" &&
+                        u.role !== "Teacher" &&
+                        u.role !== "Bursar" &&
+                        u.role !== "ClassTeacher" &&
+                        u.role !== "Class Teacher" &&
+                        u.role !== "SubjectTeacher" &&
+                        u.role !== "Subject Teacher" && (
                           <Badge
                             variant="secondary"
                             className={ROLE_COLORS[u.role] || ROLE_COLORS["STAFF"]}
@@ -411,7 +442,6 @@ export default function UserListView() {
                             {ROLE_LABELS[u.role] || u.role}
                           </Badge>
                         )}
-                      
                     </div>
                   </TableCell>
                   <TableCell className="text-right">

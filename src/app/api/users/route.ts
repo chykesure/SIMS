@@ -6,6 +6,16 @@ function getTenantId(request: NextRequest): string {
   return request.headers.get("x-tenant-id") || "";
 }
 
+// Map SystemRole enum values to legacy user.role strings
+const SYSTEM_ROLE_TO_LEGACY: Record<string, string> = {
+  ADMIN: "Admin",
+  BURSAR: "Bursar",
+  TEACHER: "Teacher",
+  CLASS_TEACHER: "Teacher",
+  SUBJECT_TEACHER: "Teacher",
+  STAFF: "Staff",
+};
+
 // GET all users with their roles
 export async function GET(request: NextRequest) {
   try {
@@ -88,19 +98,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Determine primary role (for backward compat) from the roles array
+    // Determine resolved roles array
     const resolvedRoles: string[] = Array.isArray(roles) && roles.length > 0
       ? roles
       : role
         ? [role]
-        : ["Staff"];
+        : ["STAFF"];
 
-    // If "Admin" is in roles, use it as primary; otherwise use first role
-    const primaryRole = resolvedRoles.includes("Admin")
-      ? "Admin"
-      : resolvedRoles[0] || "Staff";
-
-    // Validate all roles
+    // Validate all roles against SystemRole enum
     const validRoles = Object.values(SystemRole);
     const invalidRoles = resolvedRoles.filter(
       (r) => !validRoles.includes(r as SystemRole)
@@ -110,6 +115,24 @@ export async function POST(request: NextRequest) {
         { success: false, message: `Invalid roles: ${invalidRoles.join(", ")}` },
         { status: 400 }
       );
+    }
+
+    // Determine primary legacy role:
+    // Admin takes priority, then TEACHER/CLASS_TEACHER/SUBJECT_TEACHER all map to "Teacher"
+    // for the legacy field (so portal routing works)
+    let primaryRole = "Staff";
+    if (resolvedRoles.includes("ADMIN")) {
+      primaryRole = "Admin";
+    } else if (resolvedRoles.includes("BURSAR")) {
+      primaryRole = "Bursar";
+    } else if (
+      resolvedRoles.includes("TEACHER") ||
+      resolvedRoles.includes("CLASS_TEACHER") ||
+      resolvedRoles.includes("SUBJECT_TEACHER")
+    ) {
+      primaryRole = "Teacher";
+    } else if (resolvedRoles.includes("STAFF")) {
+      primaryRole = "Staff";
     }
 
     const user = await db.user.create({
@@ -197,10 +220,21 @@ export async function PUT(request: NextRequest) {
         );
       }
 
-      // Determine primary role
-      const primaryRole = roles.includes("Admin")
-        ? "Admin"
-        : roles[0] || "Staff";
+      // Determine primary legacy role
+      let primaryRole = "Staff";
+      if (roles.includes("ADMIN")) {
+        primaryRole = "Admin";
+      } else if (roles.includes("BURSAR")) {
+        primaryRole = "Bursar";
+      } else if (
+        roles.includes("TEACHER") ||
+        roles.includes("CLASS_TEACHER") ||
+        roles.includes("SUBJECT_TEACHER")
+      ) {
+        primaryRole = "Teacher";
+      } else if (roles.includes("STAFF")) {
+        primaryRole = "Staff";
+      }
       updateData.role = primaryRole;
 
       // Delete existing roles and create new ones
@@ -214,7 +248,7 @@ export async function PUT(request: NextRequest) {
       });
     } else if (role !== undefined) {
       // Backward compat: single role string
-      updateData.role = role;
+      updateData.role = SYSTEM_ROLE_TO_LEGACY[role] || role;
       const validRoles = Object.values(SystemRole);
       if (validRoles.includes(role as SystemRole)) {
         await db.userRole.deleteMany({ where: { userId: id } });

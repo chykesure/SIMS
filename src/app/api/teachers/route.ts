@@ -199,8 +199,20 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete associated User account
-    await db.user.deleteMany({ where: { teacherId: id, tenantId } });
+    // Find the associated User account first
+    const associatedUser = await db.user.findFirst({
+      where: { teacherId: id, tenantId },
+      select: { id: true },
+    });
+
+    // Delete login history for this user (foreign key blocks user deletion otherwise)
+    if (associatedUser) {
+      await db.loginHistory.deleteMany({
+        where: { userId: associatedUser.id },
+      });
+      // Now delete the User account
+      await db.user.deleteMany({ where: { teacherId: id, tenantId } });
+    }
 
     await db.teacher.delete({ where: { id } });
 

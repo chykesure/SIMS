@@ -213,8 +213,8 @@ const TERM_CARDS = [
 
 const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
   id: "",
-  caCount: 2,
-  ca1Max: 20,
+  caCount: 1,
+  ca1Max: 40,
   ca2Max: 20,
   ca3Max: 20,
   ca1Label: "1st CA",
@@ -224,6 +224,21 @@ const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
   examLabel: "Exam",
   totalMax: 100,
 };
+
+/**
+ * Map stored CA fields to displayed CA columns based on caCount.
+ * When caCount decreases (e.g. 3->1), scores in the last-used slots
+ * (thirdCa, secondCa) are pulled forward so the most recent data
+ * always shows in the visible columns.
+ *
+ * caCount=1 -> [thirdCa]        (last slot becomes the single CA)
+ * caCount=2 -> [secondCa, thirdCa]
+ * caCount=3 -> [firstCa, secondCa, thirdCa]
+ */
+function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number }, caCount: number): number[] {
+  const allCa = [score.firstCa, score.secondCa, score.thirdCa];
+  return allCa.slice(3 - caCount);
+}
 
 function getInitials(name: string): string {
   return name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2);
@@ -883,9 +898,21 @@ export default function ResultView() {
     return records.filter((r) => r.subjectsTaken > 0 && r.totalScore > 0);
   }, [records]);
 
-  const caCount = schoolSettings.caCount;
-  const showThirdCa = caCount >= 3;
+  const caCount = schoolSettings.caCount || 1;
   const pc = getPrimaryColor(tenant?.primaryColor ?? null);
+
+  /* Build dynamic CA column definitions based on caCount */
+  const caColumns = useMemo(() => {
+    const cols: { label: string; maxScore: number }[] = [];
+    const startIdx = 3 - caCount; // 1->2, 2->1, 3->0
+    for (let i = 0; i < caCount; i++) {
+      const fieldIdx = startIdx + i;
+      if (fieldIdx === 0) cols.push({ label: schoolSettings.ca1Label, maxScore: schoolSettings.ca1Max });
+      else if (fieldIdx === 1) cols.push({ label: schoolSettings.ca2Label, maxScore: schoolSettings.ca2Max });
+      else cols.push({ label: schoolSettings.ca3Label, maxScore: schoolSettings.ca3Max });
+    }
+    return cols;
+  }, [caCount, schoolSettings]);
 
   /* ===== CUMULATIVE FLAGS ===== */
   const isSecondTerm = selectedTerm === "Second Term";
@@ -895,13 +922,18 @@ export default function ResultView() {
   const prevTerms: number[] = isThirdTerm ? [1, 2] : isSecondTerm ? [1] : [];
 
   const columnTotals_calc = reportScores.length > 0
-    ? {
-      firstCaTotal: parseFloat(reportScores.reduce((s, e) => s + (e.firstCa || 0), 0).toFixed(1)),
-      secondCaTotal: parseFloat(reportScores.reduce((s, e) => s + (e.secondCa || 0), 0).toFixed(1)),
-      thirdCaTotal: parseFloat(reportScores.reduce((s, e) => s + (e.thirdCa || 0), 0).toFixed(1)),
-      examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
-    }
-    : { firstCaTotal: 0, secondCaTotal: 0, thirdCaTotal: 0, examTotal: 0 };
+    ? (() => {
+        const caTotals: number[] = new Array(caCount).fill(0);
+        reportScores.forEach((sc) => {
+          const mapped = mapCaScores(sc, caCount);
+          mapped.forEach((val, i) => { caTotals[i] += val || 0; });
+        });
+        return {
+          caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
+          examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
+        };
+      })()
+    : { caTotals: new Array(caCount).fill(0) as number[], examTotal: 0 };
 
   const studentTotalFromScores = parseFloat(reportScores.reduce((s, e) => s + (e.total || 0), 0).toFixed(1));
   const subjectsTakenFromScores = reportScores.length;
@@ -944,36 +976,26 @@ export default function ResultView() {
       </td>
     );
   }
+
   /* ===== SMART CUMULATIVE SUMMARY VALUES ===== */
+  // Sum cumulative totals across all subjects for the current student
   let cumGrandTotal = 0;
   let cumGrandAvg = 0;
-  // FIX: Track actual terms used for THIS student (not global class max)
-  let studentActualTermsUsed = 0;
+  const termsUsedCount = cumulativeInfo?.maxAvailableTerms || (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
 
   if (isCumulative) {
     let totalCumSum = 0;
     let subjectsWithCumData = 0;
-    // FIX: Use a Set to track how many terms THIS student actually has data for
-    const studentTermsSet = new Set<number>();
-
     for (const sc of reportScores) {
       const stuCum = getStudentCumForSubject(sc.subject);
       if (stuCum && stuCum.cumulativeAvg > 0) {
         totalCumSum += stuCum.cumulativeAvg;
         subjectsWithCumData++;
-
-        // Track which terms this student has across all subjects
-        if (stuCum.termScores) {
-          for (const [termKey] of Object.entries(stuCum.termScores)) {
-            studentTermsSet.add(Number(termKey));
-          }
-        }
+      } else if (!isCumulative) {
+        totalCumSum += sc.total || 0;
+        subjectsWithCumData++;
       }
     }
-
-    // FIX: Use the student's actual term count for the label
-    studentActualTermsUsed = studentTermsSet.size || (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
-
     cumGrandTotal = parseFloat(reportScores.reduce((s, sc) => {
       const stuCum = getStudentCumForSubject(sc.subject);
       return s + (stuCum?.cumulativeTotal ?? sc.total);
@@ -983,13 +1005,9 @@ export default function ResultView() {
       : 0;
   }
 
-  // FIX: Use per-student term count instead of global max
-  const termsUsedCount = isCumulative
-    ? studentActualTermsUsed
-    : (isThirdTerm ? 3 : isSecondTerm ? 2 : 1);
-
   const displayTotalScore = parseFloat((isCumulative ? cumGrandTotal : studentTotalFromScores).toFixed(1));
   const displayAverage = isCumulative && cumGrandAvg > 0 ? cumGrandAvg : (reportStudent?.average ?? 0);
+
   /* ===== PASSED / FAILED COUNTS ===== */
   const reportPassedCount = reportScores.filter((sc) => {
     if (isCumulative) {
@@ -1238,9 +1256,9 @@ export default function ResultView() {
                           <tr>
                             <th style={{ ...RC.th, width: 22 }}>#</th>
                             <th style={{ ...RC.thLeft }}>Subject</th>
-                            <th style={RC.th}>{schoolSettings.ca1Label}</th>
-                            <th style={RC.th}>{schoolSettings.ca2Label}</th>
-                            {showThirdCa && <th style={RC.th}>{schoolSettings.ca3Label}</th>}
+                            {caColumns.map((col, i) => (
+                              <th key={`ca-h-${i}`} style={RC.th}>{col.label}</th>
+                            ))}
                             <th style={RC.th}>{schoolSettings.examLabel}</th>
                             <th style={RC.th}>Total</th>
                             {/* ===== CUMULATIVE COLUMNS (Option E) ===== */}
@@ -1293,15 +1311,17 @@ export default function ResultView() {
 
 
 
+                            const mappedCa = mapCaScores(sc, caCount);
+
                             return (
                               <tr key={sc.id}>
                                 <td style={isAlt ? RC.tdAlt : RC.td}>{idx + 1}</td>
                                 <td style={isAlt ? RC.tdAltLeft : RC.tdLeft}>{sc.subject}</td>
-                                <td style={isAlt ? RC.tdAlt : RC.td}>{sc.firstCa}</td>
-                                <td style={isAlt ? RC.tdAlt : RC.td}>{sc.secondCa}</td>
-                                {showThirdCa && <td style={isAlt ? RC.tdAlt : RC.td}>{sc.thirdCa}</td>}
+                                {mappedCa.map((val, i) => (
+                                  <td key={`ca-${i}`} style={isAlt ? RC.tdAlt : RC.td}>{val}</td>
+                                ))}
                                 <td style={isAlt ? RC.tdAlt : RC.td}>
-                                  {(sc.exam === 0 && (sc.firstCa > 0 || sc.secondCa > 0 || sc.thirdCa > 0)) ? (
+                                  {(sc.exam === 0 && mappedCa.some(v => v > 0)) ? (
                                     <span style={{ color: "#dc2626", fontWeight: 700, fontSize: 8 }}>ABS</span>
                                   ) : sc.exam}
                                 </td>
@@ -1351,9 +1371,9 @@ export default function ResultView() {
                           {/* TOTAL ROW */}
                           <tr>
                             <td style={{ ...RC.totalRow, textAlign: "left", borderRight: "none" }} colSpan={2}>TOTAL</td>
-                            <td style={RC.totalRow}>{fmt(columnTotals_calc.firstCaTotal)}</td>
-                            <td style={RC.totalRow}>{fmt(columnTotals_calc.secondCaTotal)}</td>
-                            {showThirdCa && <td style={RC.totalRow}>{fmt(columnTotals_calc.thirdCaTotal)}</td>}
+                            {columnTotals_calc.caTotals.map((t, i) => (
+                              <td key={`ca-tot-${i}`} style={RC.totalRow}>{fmt(t)}</td>
+                            ))}
                             <td style={RC.totalRow}>{fmt(columnTotals_calc.examTotal)}</td>
                             <td style={{ ...RC.totalRow, fontWeight: 800, color: pc }}>{fmt(studentTotalFromScores)}</td>
 

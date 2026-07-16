@@ -48,9 +48,9 @@ interface SchoolSettings {
 
 const DEFAULT_SETTINGS: SchoolSettings = {
   id: "",
-  caCount: 2,
-  ca1Max: 15,
-  ca2Max: 15,
+  caCount: 1,
+  ca1Max: 40,
+  ca2Max: 20,
   ca3Max: 10,
   ca1Label: "1st CA",
   ca2Label: "2nd CA",
@@ -94,7 +94,7 @@ export default function AssessmentSettings() {
 
   /* ---- derived ---- */
   const computedTotal =
-    form.ca1Max + form.ca2Max + (form.caCount >= 3 ? form.ca3Max : 0) + form.examMax;
+    form.ca1Max + (form.caCount >= 2 ? form.ca2Max : 0) + (form.caCount >= 3 ? form.ca3Max : 0) + form.examMax;
 
   /* ---- save ---- */
   async function handleSave() {
@@ -199,8 +199,12 @@ export default function AssessmentSettings() {
           </div>
           <div className="rounded-lg border border-emerald-200 bg-white p-4 font-mono text-sm">
             <span className="font-bold text-emerald-700">{form.ca1Label}({form.ca1Max})</span>
-            <span className="text-muted-foreground"> + </span>
-            <span className="font-bold text-emerald-700">{form.ca2Label}({form.ca2Max})</span>
+            {form.caCount >= 2 && (
+              <>
+                <span className="text-muted-foreground"> + </span>
+                <span className="font-bold text-emerald-700">{form.ca2Label}({form.ca2Max})</span>
+              </>
+            )}
             {form.caCount >= 3 && (
               <>
                 <span className="text-muted-foreground"> + </span>
@@ -283,7 +287,8 @@ export default function AssessmentSettings() {
                 </div>
               </div>
 
-              {/* CA2 - always shown */}
+              {/* CA2 - shown when caCount >= 2 */}
+              {form.caCount >= 2 && (
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="font-mono">CA2</Badge>
@@ -307,8 +312,9 @@ export default function AssessmentSettings() {
                   />
                 </div>
               </div>
+              )}
 
-              {/* CA3 - conditional */}
+              {/* CA3 - shown when caCount >= 3 */}
               {form.caCount >= 3 && (
                 <div className="rounded-lg border p-4 space-y-3">
                   <div className="flex items-center gap-2">
@@ -388,7 +394,7 @@ export default function AssessmentSettings() {
                   <span className="text-muted-foreground">Computed: </span>
                   <span className="font-bold text-emerald-700">{computedTotal}</span>
                   {computedTotal !== form.totalMax && (
-                    <span className="text-red-500 ml-1">(⚠ mismatch with Total Max)</span>
+                    <span className="text-red-500 ml-1">(mismatch with Total Max)</span>
                   )}
                 </div>
               </div>

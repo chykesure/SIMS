@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/index'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -102,6 +102,20 @@ interface SchoolInfo {
   state: string | null
 }
 
+interface SchoolSettings {
+  id: string
+  caCount: number
+  ca1Max: number
+  ca2Max: number
+  ca3Max: number
+  ca1Label: string
+  ca2Label: string
+  ca3Label: string
+  examMax: number
+  examLabel: string
+  totalMax: number
+}
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -154,6 +168,35 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 function getInitials(name: string): string {
   return name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
+  id: "",
+  caCount: 1,
+  ca1Max: 40,
+  ca2Max: 20,
+  ca3Max: 20,
+  ca1Label: "1st CA",
+  ca2Label: "2nd CA",
+  ca3Label: "3rd CA",
+  examMax: 60,
+  examLabel: "Exam",
+  totalMax: 100,
+};
+
+/**
+ * Map stored CA fields to displayed CA columns based on caCount.
+ * When caCount decreases (e.g. 3->1), scores in the last-used slots
+ * (thirdCa, secondCa) are pulled forward so the most recent data
+ * always shows in the visible columns.
+ *
+ * caCount=1 -> [thirdCa]        (last slot becomes the single CA)
+ * caCount=2 -> [secondCa, thirdCa]
+ * caCount=3 -> [firstCa, secondCa, thirdCa]
+ */
+function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number }, caCount: number): number[] {
+  const allCa = [score.firstCa, score.secondCa, score.thirdCa];
+  return allCa.slice(3 - caCount);
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,8 +359,19 @@ export function StudentResults() {
   const [selectedTerm, setSelectedTerm] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
+  const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>(DEFAULT_SCHOOL_SETTINGS)
 
   const primaryColor = tenant?.primaryColor || '#821329'
+
+  /* ===== Fetch school settings ===== */
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/settings?type=school-settings")
+        if (res.ok) { const d = await res.json(); if (d && d.id) setSchoolSettings(d) }
+      } catch { /* use defaults */ }
+    })()
+  }, [])
 
   const fetchResults = useCallback(async (session?: string, term?: string) => {
     setLoading(true)
@@ -364,6 +418,21 @@ export function StudentResults() {
   const uniqueTerms = (data?.availableFilters
     ? [...new Set(data.availableFilters.map(f => f.term).filter(Boolean))]
     : [])
+
+  /* ======== DYNAMIC CA COLUMNS ======== */
+  const caCount = schoolSettings.caCount || 1
+
+  const caLabels = useMemo(() => {
+    const labels: string[] = []
+    const startIdx = 3 - caCount
+    for (let i = 0; i < caCount; i++) {
+      const fieldIdx = startIdx + i
+      if (fieldIdx === 0) labels.push(schoolSettings.ca1Label)
+      else if (fieldIdx === 1) labels.push(schoolSettings.ca2Label)
+      else labels.push(schoolSettings.ca3Label)
+    }
+    return labels
+  }, [caCount, schoolSettings])
 
   /* ======== REPORT CARD ======== */
   const openReportCard = () => {
@@ -429,6 +498,17 @@ export function StudentResults() {
 
   const RC = buildRCStyles(primaryColor)
 
+  /* ===== CA column totals for report card ===== */
+  const caColumnTotals = useMemo(() => {
+    if (!data || data.scores.length === 0) return new Array(caCount).fill(0) as number[]
+    const totals: number[] = new Array(caCount).fill(0)
+    data.scores.forEach((sc) => {
+      const mapped = mapCaScores(sc, caCount)
+      mapped.forEach((val, i) => { totals[i] += val || 0 })
+    })
+    return totals.map(t => parseFloat(t.toFixed(1)))
+  }, [data, caCount])
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -458,7 +538,6 @@ export function StudentResults() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="flex-1 space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Session</label>
-              {/* FIX: value={selectedSession || undefined} prevents matching disabled placeholder */}
               <Select value={selectedSession || undefined} onValueChange={handleSessionChange}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select session" />
@@ -469,12 +548,10 @@ export function StudentResults() {
                       <SelectItem key={s} value={s}>{s}</SelectItem>
                     ))
                   ) : data?.session ? (
-                    /* FIX: use data.session directly only when truthy */
                     <SelectItem value={data.session} disabled>
                       {data.session}
                     </SelectItem>
                   ) : (
-                    /* FIX: "_none" instead of empty string */
                     <SelectItem value="_none" disabled>
                       No sessions available
                     </SelectItem>
@@ -484,7 +561,6 @@ export function StudentResults() {
             </div>
             <div className="flex-1 space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Term</label>
-              {/* FIX: value={selectedTerm || undefined} prevents matching disabled placeholder */}
               <Select value={selectedTerm || undefined} onValueChange={handleTermChange}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select term" />
@@ -495,12 +571,10 @@ export function StudentResults() {
                       <SelectItem key={t} value={t}>{t}</SelectItem>
                     ))
                   ) : data?.term ? (
-                    /* FIX: use data.term directly only when truthy */
                     <SelectItem value={data.term} disabled>
                       {data.term}
                     </SelectItem>
                   ) : (
-                    /* FIX: "_none" instead of empty string */
                     <SelectItem value="_none" disabled>
                       No terms available
                     </SelectItem>
@@ -599,9 +673,9 @@ export function StudentResults() {
                     <TableRow>
                       <TableHead className="w-[40px]">#</TableHead>
                       <TableHead>Subject</TableHead>
-                      <TableHead className="text-center">CA1</TableHead>
-                      <TableHead className="text-center">CA2</TableHead>
-                      <TableHead className="text-center">CA3</TableHead>
+                      {caLabels.map((label, i) => (
+                        <TableHead key={`ca-h-d-${i}`} className="text-center">{label}</TableHead>
+                      ))}
                       <TableHead className="text-center">Exam</TableHead>
                       <TableHead className="text-center">Total</TableHead>
                       <TableHead className="text-center">Grade</TableHead>
@@ -610,91 +684,95 @@ export function StudentResults() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.scores.map((score, index) => (
-                      <TableRow key={score.id}>
-                        <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
-                        <TableCell className="font-medium">{score.subject}</TableCell>
-                        <TableCell className="text-center">{score.firstCa}</TableCell>
-                        <TableCell className="text-center">{score.secondCa}</TableCell>
-                        <TableCell className="text-center">{score.thirdCa}</TableCell>
-                        <TableCell className="text-center">{score.exam}</TableCell>
-                        <TableCell className="text-center font-bold">{score.total}</TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant="secondary" className={cn('text-xs', getGradeColor(score.grade))}>
-                            {score.grade}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {score.position && score.subjectTotalStudents ? (
-                            <span className="text-xs">
-                              <span className="font-semibold text-blue-600">
-                                {score.position}<sup className="text-[9px]">{getPositionSuffix(score.position)}</sup>
+                    {data.scores.map((score, index) => {
+                      const mappedCa = mapCaScores(score, caCount)
+                      return (
+                        <TableRow key={score.id}>
+                          <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
+                          <TableCell className="font-medium">{score.subject}</TableCell>
+                          {mappedCa.map((val, i) => (
+                            <TableCell key={`ca-d-${i}`} className="text-center">{val}</TableCell>
+                          ))}
+                          <TableCell className="text-center">{score.exam}</TableCell>
+                          <TableCell className="text-center font-bold">{score.total}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="secondary" className={cn('text-xs', getGradeColor(score.grade))}>
+                              {score.grade}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {score.position && score.subjectTotalStudents ? (
+                              <span className="text-xs">
+                                <span className="font-semibold text-blue-600">
+                                  {score.position}<sup className="text-[9px]">{getPositionSuffix(score.position)}</sup>
+                                </span>
+                                <span className="text-muted-foreground">/{score.subjectTotalStudents}</span>
                               </span>
-                              <span className="text-muted-foreground">/{score.subjectTotalStudents}</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center text-xs text-muted-foreground">
-                          {score.remark || '—'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center text-xs text-muted-foreground">
+                            {score.remark || '—'}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>
 
               {/* Mobile Cards */}
               <div className="md:hidden space-y-3">
-                {data.scores.map((score, index) => (
-                  <div key={score.id} className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                          {index + 1}
-                        </span>
-                        <span className="text-sm font-medium">{score.subject}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {score.position && score.subjectTotalStudents && (
-                          <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-200 bg-blue-50">
-                            {score.position}{getPositionSuffix(score.position)}/{score.subjectTotalStudents}
+                {data.scores.map((score, index) => {
+                  const mappedCa = mapCaScores(score, caCount)
+                  return (
+                    <div key={score.id} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                            {index + 1}
+                          </span>
+                          <span className="text-sm font-medium">{score.subject}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {score.position && score.subjectTotalStudents && (
+                            <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-200 bg-blue-50">
+                              {score.position}{getPositionSuffix(score.position)}/{score.subjectTotalStudents}
+                            </Badge>
+                          )}
+                          <Badge variant="secondary" className={cn('text-xs', getGradeColor(score.grade))}>
+                            {score.grade}
                           </Badge>
-                        )}
-                        <Badge variant="secondary" className={cn('text-xs', getGradeColor(score.grade))}>
-                          {score.grade}
-                        </Badge>
+                        </div>
                       </div>
+                      <div className={`grid gap-2 text-center ${caCount === 1 ? 'grid-cols-3' : caCount === 2 ? 'grid-cols-4' : 'grid-cols-5'}`}>
+                        {mappedCa.map((val, i) => (
+                          <div key={`ca-m-${i}`}>
+                            <p className="text-[10px] text-muted-foreground">{caLabels[i]}</p>
+                            <p className="text-sm font-medium">{val}</p>
+                          </div>
+                        ))}
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Exam</p>
+                          <p className="text-sm font-medium">{score.exam}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Total</p>
+                          <p className="text-sm font-bold">{score.total}</p>
+                        </div>
+                      </div>
+                      {(score.remark || (score.position && score.subjectTotalStudents)) && (
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-muted/50">
+                          {score.remark && (
+                            <span className="text-[10px] text-muted-foreground italic">{score.remark}</span>
+                          )}
+                          {!score.position && !score.subjectTotalStudents && score.remark && <span />}
+                        </div>
+                      )}
                     </div>
-                    <div className="grid grid-cols-4 gap-2 text-center">
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">CA1</p>
-                        <p className="text-sm font-medium">{score.firstCa}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">CA2</p>
-                        <p className="text-sm font-medium">{score.secondCa}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">Exam</p>
-                        <p className="text-sm font-medium">{score.exam}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">Total</p>
-                        <p className="text-sm font-bold">{score.total}</p>
-                      </div>
-                    </div>
-                    {(score.remark || (score.position && score.subjectTotalStudents)) && (
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-muted/50">
-                        {score.remark && (
-                          <span className="text-[10px] text-muted-foreground italic">{score.remark}</span>
-                        )}
-                        {!score.position && !score.subjectTotalStudents && score.remark && <span />}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Student Record Info */}
@@ -815,10 +893,10 @@ export function StudentResults() {
                         <tr>
                           <th style={{ ...RC.th, width: 22 }}>#</th>
                           <th style={RC.thLeft}>Subject</th>
-                          <th style={RC.th}>CA1</th>
-                          <th style={RC.th}>CA2</th>
-                          <th style={RC.th}>CA3</th>
-                          <th style={RC.th}>Exam</th>
+                          {caLabels.map((label, i) => (
+                            <th key={`ca-h-rc-${i}`} style={RC.th}>{label}</th>
+                          ))}
+                          <th style={RC.th}>{schoolSettings.examLabel}</th>
                           <th style={RC.th}>Total</th>
                           <th style={RC.th}>Grade</th>
                           <th style={RC.th}>Position</th>
@@ -828,13 +906,14 @@ export function StudentResults() {
                       <tbody>
                         {data.scores.map((sc, idx) => {
                           const isAlt = idx % 2 === 1
+                          const mappedCa = mapCaScores(sc, caCount)
                           return (
                             <tr key={sc.id}>
                               <td style={isAlt ? RC.tdAlt : RC.td}>{idx + 1}</td>
                               <td style={isAlt ? RC.tdAltLeft : RC.tdLeft}>{sc.subject}</td>
-                              <td style={isAlt ? RC.tdAlt : RC.td}>{sc.firstCa}</td>
-                              <td style={isAlt ? RC.tdAlt : RC.td}>{sc.secondCa}</td>
-                              <td style={isAlt ? RC.tdAlt : RC.td}>{sc.thirdCa}</td>
+                              {mappedCa.map((val, i) => (
+                                <td key={`ca-rc-${i}`} style={isAlt ? RC.tdAlt : RC.td}>{val}</td>
+                              ))}
                               <td style={isAlt ? RC.tdAlt : RC.td}>{sc.exam}</td>
                               <td style={{ ...(isAlt ? RC.tdAlt : RC.td), fontWeight: 700 }}>{sc.total}</td>
                               <td style={isAlt ? RC.tdAlt : RC.td}>
@@ -854,9 +933,9 @@ export function StudentResults() {
                         {/* TOTAL ROW */}
                         <tr>
                           <td style={{ ...RC.totalRow, textAlign: "left", borderRight: "none" }} colSpan={2}>TOTAL</td>
-                          <td style={RC.totalRow}>{data.scores.reduce((s, e) => s + (e.firstCa || 0), 0)}</td>
-                          <td style={RC.totalRow}>{data.scores.reduce((s, e) => s + (e.secondCa || 0), 0)}</td>
-                          <td style={RC.totalRow}>{data.scores.reduce((s, e) => s + (e.thirdCa || 0), 0)}</td>
+                          {caColumnTotals.map((t, i) => (
+                            <td key={`ca-tot-rc-${i}`} style={RC.totalRow}>{t}</td>
+                          ))}
                           <td style={RC.totalRow}>{data.scores.reduce((s, e) => s + (e.exam || 0), 0)}</td>
                           <td style={{ ...RC.totalRow, fontWeight: 800, color: primaryColor }}>{data.totalScore}</td>
                           <td style={RC.totalRow}></td>
@@ -869,7 +948,7 @@ export function StudentResults() {
 
                   {/* Subjects taken line */}
                   <div style={{ fontSize: 8, color: "#374151", marginBottom: 4, fontStyle: "italic" }}>
-                    Subjects Taken: {data.subjectsTaken} | Total Obtainable: {100 * data.subjectsTaken} | Obtained: {data.totalScore}
+                    Subjects Taken: {data.subjectsTaken} | Total Obtainable: {schoolSettings.totalMax * data.subjectsTaken} | Obtained: {data.totalScore}
                   </div>
 
                   {/* ======== SUMMARY ======== */}

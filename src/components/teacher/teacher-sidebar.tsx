@@ -27,6 +27,7 @@ import {
   BookOpen,
   Menu,
   UserCircle,
+  BarChart3,
   Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -66,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Classes', page: 'teacher-classes', icon: School },
       { label: 'Subjects', page: 'teacher-subjects', icon: BookOpen },
       { label: 'Score Entry', page: 'teacher-scores', icon: FileEdit },
+      { label: 'Results', page: 'teacher-results', icon: BarChart3 },
       { label: 'AI Assistant', page: 'teacher-ai-assistant', icon: Sparkles },
       { label: 'Assignments', page: 'teacher-assignments', icon: ClipboardList },
       { label: 'Announcements', page: 'teacher-announcements', icon: Megaphone },
