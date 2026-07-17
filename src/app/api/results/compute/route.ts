@@ -6,6 +6,11 @@ function getTenantId(request: Request): string {
   return request.headers.get("x-tenant-id") || "";
 }
 
+/** Normalize a fullname for consistent grouping (uppercase + trim + collapse whitespace) */
+function normalizeFullname(name: string): string {
+  return name.trim().toUpperCase().replace(/\s+/g, " ");
+}
+
 // GET /api/results/compute?session=xxx&class=xxx&term=xxx
 export async function GET(request: Request) {
   try {
@@ -42,17 +47,28 @@ export async function GET(request: Request) {
       );
     }
 
-    // Group scores by student fullname
+    // Group scores by NORMALIZED student fullname to merge name variations
     const studentMap = new Map<string, { fullname: string; subjects: typeof scores; totalScore: number }>();
 
     for (const score of scores) {
-      const existing = studentMap.get(score.fullname);
+      const key = normalizeFullname(score.fullname);
+      const existing = studentMap.get(key);
       if (existing) {
-        existing.subjects.push(score);
-        existing.totalScore += score.total;
+        // Deduplicate: if same subject already exists, keep the latest
+        const existingSubject = existing.subjects.find((s) => s.subject === score.subject);
+        if (existingSubject) {
+          // Replace older subject score with newer one
+          existing.totalScore -= existingSubject.total;
+          const idx = existing.subjects.indexOf(existingSubject);
+          existing.subjects[idx] = score;
+          existing.totalScore += score.total;
+        } else {
+          existing.subjects.push(score);
+          existing.totalScore += score.total;
+        }
       } else {
-        studentMap.set(score.fullname, {
-          fullname: score.fullname,
+        studentMap.set(key, {
+          fullname: key, // Use normalized name
           subjects: [score],
           totalScore: score.total,
         });
@@ -94,7 +110,15 @@ export async function GET(request: Request) {
 
     const classArmTotal = studentStats.length;
 
-    // Assign class positions (handle ties) and save records
+    // ============================================================
+    // DELETE all existing StudentRecords for this session/class/term
+    // to prevent duplicate accumulation from name variations
+    // ============================================================
+    await db.studentRecord.deleteMany({
+      where: { tenantId, session, class: cls, term },
+    });
+
+    // Assign class positions (handle ties) and create fresh records
     let currentPosition = 1;
     for (let i = 0; i < studentStats.length; i++) {
       if (i > 0 && studentStats[i].totalScore < studentStats[i - 1].totalScore) {
@@ -103,45 +127,25 @@ export async function GET(request: Request) {
 
       const stat = studentStats[i];
 
-      const existing = await db.studentRecord.findFirst({
-        where: { tenantId, session, class: cls, term, fullname: stat.fullname },
+      await db.studentRecord.create({
+        data: {
+          tenantId,
+          session,
+          class: cls,
+          classRef: "",
+          term,
+          fullname: stat.fullname,
+          totalScore: stat.totalScore,
+          average: stat.average,
+          percentage: stat.percentage,
+          subjectsTaken: stat.subjectsTaken,
+          subjectsPassed: stat.subjectsPassed,
+          subjectsFailed: stat.subjectsFailed,
+          classPosition: currentPosition,
+          overallPosition: 0,
+          totalStudents: classArmTotal,
+        },
       });
-
-      if (existing) {
-        await db.studentRecord.update({
-          where: { id: existing.id },
-          data: {
-            totalScore: stat.totalScore,
-            average: stat.average,
-            percentage: stat.percentage,
-            subjectsTaken: stat.subjectsTaken,
-            subjectsPassed: stat.subjectsPassed,
-            subjectsFailed: stat.subjectsFailed,
-            classPosition: currentPosition,
-            totalStudents: classArmTotal,
-          },
-        });
-      } else {
-        await db.studentRecord.create({
-          data: {
-            tenantId,
-            session,
-            class: cls,
-            classRef: "",
-            term,
-            fullname: stat.fullname,
-            totalScore: stat.totalScore,
-            average: stat.average,
-            percentage: stat.percentage,
-            subjectsTaken: stat.subjectsTaken,
-            subjectsPassed: stat.subjectsPassed,
-            subjectsFailed: stat.subjectsFailed,
-            classPosition: currentPosition,
-            overallPosition: 0,
-            totalStudents: classArmTotal,
-          },
-        });
-      }
     }
 
     // ============================================================

@@ -712,14 +712,15 @@ export default function ResultView() {
       if (recRes.ok) {
         const allRecs = await recRes.json();
         // Also fetch actual exam scores to filter students who have no scores
+        // Use normalized (uppercase) fullname for matching to handle name variations
         const scoreRes = await fetch(`/api/exams?${params}`);
         let studentsWithScores = new Set<string>();
         if (scoreRes.ok) {
           const scores = await scoreRes.json();
-          studentsWithScores = new Set(scores.map((s: any) => s.fullname));
+          studentsWithScores = new Set(scores.map((s: any) => s.fullname.trim().toUpperCase()));
         }
-        // Only show students who actually have exam scores
-        const filteredRecs = allRecs.filter((r: any) => studentsWithScores.has(r.fullname));
+        // Only show students who actually have exam scores (normalized match)
+        const filteredRecs = allRecs.filter((r: any) => studentsWithScores.has(r.fullname.trim().toUpperCase()));
         setRecords(filteredRecs);
       }
 
@@ -728,7 +729,7 @@ export default function ResultView() {
         const allRes = await fetch(`/api/results?${new URLSearchParams({ session: selectedSession, term: selectedTerm })}`);
         if (allRes.ok) {
           const allRecs: StudentRecord[] = await allRes.json();
-          setOverallTotalStudents(new Set(allRecs.filter((r) => extractClassBase(r.class) === classBase).map((r) => r.fullname)).size);
+          setOverallTotalStudents(new Set(allRecs.filter((r) => extractClassBase(r.class) === classBase).map((r) => r.fullname.trim().toUpperCase())).size);
         }
       }
     } catch { toast.error("Network error"); }
@@ -901,7 +902,17 @@ export default function ResultView() {
   /*  Derived                                                          */
   /* ================================================================ */
   const visibleRecords = useMemo(() => {
-    return records.filter((r) => r.subjectsTaken > 0 && r.totalScore > 0);
+    // Deduplicate by normalized fullname (uppercase + trim) to handle
+    // any residual name variations that survived the compute route
+    const seen = new Map<string, StudentRecord>();
+    for (const r of records) {
+      if (r.subjectsTaken <= 0 || r.totalScore <= 0) continue;
+      const key = r.fullname.trim().toUpperCase();
+      if (!seen.has(key)) {
+        seen.set(key, r);
+      }
+    }
+    return Array.from(seen.values());
   }, [records]);
 
   const caCount = schoolSettings.caCount || 1;

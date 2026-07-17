@@ -1,3 +1,4 @@
+//src/app/api/exams/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
@@ -19,7 +20,14 @@ export async function GET(request: Request) {
     if (session) where.session = session;
     if (cls) where.class = cls;
     if (term) where.term = term;
-    if (fullname) where.fullname = fullname;
+    // Case-insensitive fullname match to handle uppercase StudentRecord names
+    // vs mixed-case ExamScore names
+    if (fullname) {
+      where.OR = [
+        { fullname: { equals: fullname, mode: "insensitive" } },
+        { fullname: { equals: fullname.toUpperCase(), mode: "insensitive" } },
+      ];
+    }
 
     const scores = await db.examScore.findMany({
       where,
@@ -50,14 +58,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check for duplicate entry
+    // Check for duplicate entry (case-insensitive on fullname)
     const existing = await db.examScore.findFirst({
       where: {
         tenantId,
         session,
         class: cls,
         term,
-        fullname,
+        fullname: { equals: fullname, mode: "insensitive" },
         subject,
       },
     });
@@ -164,7 +172,7 @@ export async function DELETE(request: Request) {
 
     if (!id) {
       return NextResponse.json(
-        { success: false, message: "Exam score id is required" },
+        { success: false, message: "Record id is required" },
         { status: 400 }
       );
     }
