@@ -6,7 +6,7 @@ function getTenantId(request: Request): string {
   return request.headers.get("x-tenant-id") || "";
 }
 
-/** Normalize a fullname for consistent grouping (uppercase + trim + collapse whitespace) */
+/** Normalize a fullname for grouping only (uppercase + trim + collapse whitespace) */
 function normalizeFullname(name: string): string {
   return name.trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -48,6 +48,7 @@ export async function GET(request: Request) {
     }
 
     // Group scores by NORMALIZED student fullname to merge name variations
+    // BUT keep the original-case fullname from the first score for storage
     const studentMap = new Map<string, { fullname: string; subjects: typeof scores; totalScore: number }>();
 
     for (const score of scores) {
@@ -57,7 +58,6 @@ export async function GET(request: Request) {
         // Deduplicate: if same subject already exists, keep the latest
         const existingSubject = existing.subjects.find((s) => s.subject === score.subject);
         if (existingSubject) {
-          // Replace older subject score with newer one
           existing.totalScore -= existingSubject.total;
           const idx = existing.subjects.indexOf(existingSubject);
           existing.subjects[idx] = score;
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
         }
       } else {
         studentMap.set(key, {
-          fullname: key, // Use normalized name
+          fullname: score.fullname, // Keep ORIGINAL case from ExamScore
           subjects: [score],
           totalScore: score.total,
         });
@@ -88,6 +88,9 @@ export async function GET(request: Request) {
 
     const studentStats: StudentStats[] = [];
     for (const [, value] of studentMap) {
+      // Skip students with zero total score — they have no real scores entered
+      if (value.totalScore <= 0) continue;
+
       const subjectsTaken = value.subjects.length;
       const subjectsPassed = value.subjects.filter((s) => s.total >= 40).length;
       const subjectsFailed = subjectsTaken - subjectsPassed;
@@ -105,15 +108,20 @@ export async function GET(request: Request) {
       });
     }
 
-    // Sort by totalScore descending to determine class positions (within this arm)
+    if (studentStats.length === 0) {
+      return NextResponse.json(
+        { success: false, message: "No valid scores found for the selected criteria" },
+        { status: 404 }
+      );
+    }
+
+    // Sort by totalScore descending to determine class positions
     studentStats.sort((a, b) => b.totalScore - a.totalScore);
 
     const classArmTotal = studentStats.length;
 
-    // ============================================================
     // DELETE all existing StudentRecords for this session/class/term
-    // to prevent duplicate accumulation from name variations
-    // ============================================================
+    // to prevent duplicate accumulation from name variations or stale data
     await db.studentRecord.deleteMany({
       where: { tenantId, session, class: cls, term },
     });
@@ -148,14 +156,9 @@ export async function GET(request: Request) {
       });
     }
 
-    // ============================================================
     // COMPUTE OVERALL POSITION across all class arms
-    // e.g., JSS1A, JSS1B, JSS1C → extract "JSS1" as base class
-    // BUG FIX: Do NOT overwrite totalStudents here - keep class arm count
-    // ============================================================
     const classBase = extractClassBase(cls);
     if (classBase) {
-      // Get ALL records for this session/term/class base
       const allArmRecords = await db.studentRecord.findMany({
         where: {
           tenantId,
@@ -166,9 +169,7 @@ export async function GET(request: Request) {
         orderBy: { totalScore: "desc" },
       });
 
-      // Rank by totalScore - do NOT update totalStudents
       let overallPos = 1;
-
       for (let i = 0; i < allArmRecords.length; i++) {
         if (i > 0 && allArmRecords[i].totalScore < allArmRecords[i - 1].totalScore) {
           overallPos = i + 1;
@@ -178,13 +179,12 @@ export async function GET(request: Request) {
           where: { id: allArmRecords[i].id },
           data: {
             overallPosition: overallPos,
-            // Do NOT update totalStudents here - keep class arm count
           },
         });
       }
     }
 
-    // Fetch all created/updated records
+    // Fetch all created records
     const records = await db.studentRecord.findMany({
       where: { tenantId, session, class: cls, term },
       orderBy: { classPosition: "asc" },
@@ -205,11 +205,6 @@ export async function GET(request: Request) {
   }
 }
 
-/**
- * Extract base class from a class arm.
- * e.g., "JSS1A" → "JSS1", "SSS2B" → "SSS2", "JSS3C" → "JSS3"
- * Falls back to the full class name if no pattern matches.
- */
 function extractClassBase(cls: string): string {
   const match = cls.match(/^(JSS\d|SSS\d)/i);
   return match ? match[1].toUpperCase() : "";

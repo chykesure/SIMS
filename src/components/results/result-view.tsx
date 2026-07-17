@@ -706,13 +706,17 @@ export default function ResultView() {
       const params = new URLSearchParams({ session: selectedSession, class: selectedClass, term: selectedTerm });
       const res = await fetch(`/api/results/compute?${params}`);
       const data = await res.json();
-      if (!res.ok || !data.success) { toast.error(data.message || "Failed to compute results"); return; }
+      if (!res.ok || !data.success) {
+        // No scores for this term — clear the table
+        setRecords([]);
+        if (data.message) toast.error(data.message);
+        return;
+      }
       toast.success(data.message);
       const recRes = await fetch(`/api/results?${params}`);
       if (recRes.ok) {
         const allRecs = await recRes.json();
-        // Also fetch actual exam scores to filter students who have no scores
-        // Use normalized (uppercase) fullname for matching to handle name variations
+        // Also fetch actual exam scores to verify students have real scores
         const scoreRes = await fetch(`/api/exams?${params}`);
         let studentsWithScores = new Set<string>();
         if (scoreRes.ok) {
@@ -902,8 +906,7 @@ export default function ResultView() {
   /*  Derived                                                          */
   /* ================================================================ */
   const visibleRecords = useMemo(() => {
-    // Deduplicate by normalized fullname (uppercase + trim) to handle
-    // any residual name variations that survived the compute route
+    // Deduplicate by normalized fullname + skip students with no real scores
     const seen = new Map<string, StudentRecord>();
     for (const r of records) {
       if (r.subjectsTaken <= 0 || r.totalScore <= 0) continue;
