@@ -227,14 +227,21 @@ const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
 
 /**
  * Map stored CA fields to displayed CA columns based on caCount.
- * Teachers enter scores left-to-right (firstCa first), so we
- * always read from the START of the array.
  *
- * caCount=1 -> [firstCa]
+ * For caCount=1: Derive CA from total - exam so it works regardless
+ * of which DB field the score was stored in (handles legacy data
+ * entered when caCount was different).
+ *
+ * For caCount>1: Read individual fields left-to-right.
+ *
+ * caCount=1 -> [total - exam]
  * caCount=2 -> [firstCa, secondCa]
  * caCount=3 -> [firstCa, secondCa, thirdCa]
  */
-function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number }, caCount: number): number[] {
+function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number; exam: number; total: number }, caCount: number): number[] {
+  if (caCount === 1) {
+    return [(score.total || 0) - (score.exam || 0)];
+  }
   const allCa = [score.firstCa, score.secondCa, score.thirdCa];
   return allCa.slice(0, caCount);
 }
