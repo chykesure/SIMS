@@ -106,15 +106,19 @@ export function TeacherScores() {
   const primaryColor = tenant?.primaryColor || '#821329'
 
   // Build dynamic CA columns based on assessment settings
+  // Field mapping MUST match mapCaScores logic: always read/write from START
+  //   caCount=1 -> [firstCa]
+  //   caCount=2 -> [firstCa, secondCa]
+  //   caCount=3 -> [firstCa, secondCa, thirdCa]
   const caColumns = useMemo(() => {
-    const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = [
-      { field: 'firstCa', label: assessment.ca1Label, max: assessment.ca1Max },
-    ]
-    if (assessment.caCount >= 2) {
-      cols.push({ field: 'secondCa', label: assessment.ca2Label, max: assessment.ca2Max })
-    }
-    if (assessment.caCount >= 3) {
-      cols.push({ field: 'thirdCa', label: assessment.ca3Label, max: assessment.ca3Max })
+    const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = []
+    const fields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
+    const labels: string[] = assessment.caCount === 1
+      ? ['CA']
+      : ['CA1', 'CA2', 'CA3']
+    const maxes = [assessment.ca1Max, assessment.ca2Max, assessment.ca3Max]
+    for (let i = 0; i < assessment.caCount; i++) {
+      cols.push({ field: fields[i], label: labels[i], max: maxes[i] })
     }
     return cols
   }, [assessment])

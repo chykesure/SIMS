@@ -227,17 +227,16 @@ const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
 
 /**
  * Map stored CA fields to displayed CA columns based on caCount.
- * When caCount decreases (e.g. 3->1), scores in the last-used slots
- * (thirdCa, secondCa) are pulled forward so the most recent data
- * always shows in the visible columns.
+ * Teachers enter scores left-to-right (firstCa first), so we
+ * always read from the START of the array.
  *
- * caCount=1 -> [thirdCa]        (last slot becomes the single CA)
- * caCount=2 -> [secondCa, thirdCa]
+ * caCount=1 -> [firstCa]
+ * caCount=2 -> [firstCa, secondCa]
  * caCount=3 -> [firstCa, secondCa, thirdCa]
  */
 function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number }, caCount: number): number[] {
   const allCa = [score.firstCa, score.secondCa, score.thirdCa];
-  return allCa.slice(3 - caCount);
+  return allCa.slice(0, caCount);
 }
 
 function getInitials(name: string): string {
@@ -904,16 +903,10 @@ export default function ResultView() {
   /* Build dynamic CA column definitions based on caCount */
   const caColumns = useMemo(() => {
     const cols: { label: string; maxScore: number }[] = [];
-    const startIdx = 3 - caCount; // 1->2, 2->1, 3->0
+    const maxes = [schoolSettings.ca1Max, schoolSettings.ca2Max, schoolSettings.ca3Max];
     for (let i = 0; i < caCount; i++) {
-      const fieldIdx = startIdx + i;
-      let maxScore: number;
-      if (fieldIdx === 0) maxScore = schoolSettings.ca1Max;
-      else if (fieldIdx === 1) maxScore = schoolSettings.ca2Max;
-      else maxScore = schoolSettings.ca3Max;
-      // Generate label based on visible column count, not stored field name
       const label = caCount === 1 ? "CA" : `CA${i + 1}`;
-      cols.push({ label, maxScore });
+      cols.push({ label, maxScore: maxes[i] || 20 });
     }
     return cols;
   }, [caCount, schoolSettings]);
