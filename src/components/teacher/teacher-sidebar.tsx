@@ -29,6 +29,7 @@ import {
   UserCircle,
   BarChart3,
   Sparkles,
+  TableIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -68,6 +69,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Subjects', page: 'teacher-subjects', icon: BookOpen },
       { label: 'Score Entry', page: 'teacher-scores', icon: FileEdit },
       { label: 'Results', page: 'teacher-results', icon: BarChart3 },
+      { label: 'Broadsheet', page: 'teacher-broadsheet', icon: TableIcon },
       { label: 'AI Assistant', page: 'teacher-ai-assistant', icon: Sparkles },
       { label: 'Assignments', page: 'teacher-assignments', icon: ClipboardList },
       { label: 'Announcements', page: 'teacher-announcements', icon: Megaphone },

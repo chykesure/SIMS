@@ -706,25 +706,25 @@ export default function ResultView() {
       const params = new URLSearchParams({ session: selectedSession, class: selectedClass, term: selectedTerm });
       const res = await fetch(`/api/results/compute?${params}`);
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        // No scores for this term — clear the table
-        setRecords([]);
-        if (data.message) toast.error(data.message);
-        return;
-      }
+      if (!res.ok || !data.success) { toast.error(data.message || "Failed to compute results"); return; }
       toast.success(data.message);
       const recRes = await fetch(`/api/results?${params}`);
       if (recRes.ok) {
         const allRecs = await recRes.json();
-        // Also fetch actual exam scores to verify students have real scores
+        // Also fetch actual exam scores to filter students who have no scores
         const scoreRes = await fetch(`/api/exams?${params}`);
         let studentsWithScores = new Set<string>();
         if (scoreRes.ok) {
           const scores = await scoreRes.json();
-          studentsWithScores = new Set(scores.map((s: any) => s.fullname.trim().toUpperCase()));
+          // Case-insensitive: store normalized fullnames
+          studentsWithScores = new Set(
+            (scores as any[]).map((s: any) => (s.fullname || "").trim().toUpperCase().replace(/\s+/g, " "))
+          );
         }
-        // Only show students who actually have exam scores (normalized match)
-        const filteredRecs = allRecs.filter((r: any) => studentsWithScores.has(r.fullname.trim().toUpperCase()));
+        // Only show students who actually have exam scores (case-insensitive match)
+        const filteredRecs = allRecs.filter((r: any) =>
+          studentsWithScores.has((r.fullname || "").trim().toUpperCase().replace(/\s+/g, " "))
+        );
         setRecords(filteredRecs);
       }
 
@@ -733,7 +733,7 @@ export default function ResultView() {
         const allRes = await fetch(`/api/results?${new URLSearchParams({ session: selectedSession, term: selectedTerm })}`);
         if (allRes.ok) {
           const allRecs: StudentRecord[] = await allRes.json();
-          setOverallTotalStudents(new Set(allRecs.filter((r) => extractClassBase(r.class) === classBase).map((r) => r.fullname.trim().toUpperCase())).size);
+          setOverallTotalStudents(new Set(allRecs.filter((r) => extractClassBase(r.class) === classBase).map((r) => r.fullname)).size);
         }
       }
     } catch { toast.error("Network error"); }
@@ -906,11 +906,11 @@ export default function ResultView() {
   /*  Derived                                                          */
   /* ================================================================ */
   const visibleRecords = useMemo(() => {
-    // Deduplicate by normalized fullname + skip students with no real scores
+    // Deduplicate by normalized fullname and filter out zero-score students
     const seen = new Map<string, StudentRecord>();
     for (const r of records) {
       if (r.subjectsTaken <= 0 || r.totalScore <= 0) continue;
-      const key = r.fullname.trim().toUpperCase();
+      const key = r.fullname.trim().toUpperCase().replace(/\s+/g, " ");
       if (!seen.has(key)) {
         seen.set(key, r);
       }
@@ -941,16 +941,16 @@ export default function ResultView() {
 
   const columnTotals_calc = reportScores.length > 0
     ? (() => {
-      const caTotals: number[] = new Array(caCount).fill(0);
-      reportScores.forEach((sc) => {
-        const mapped = mapCaScores(sc, caCount);
-        mapped.forEach((val, i) => { caTotals[i] += val || 0; });
-      });
-      return {
-        caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
-        examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
-      };
-    })()
+        const caTotals: number[] = new Array(caCount).fill(0);
+        reportScores.forEach((sc) => {
+          const mapped = mapCaScores(sc, caCount);
+          mapped.forEach((val, i) => { caTotals[i] += val || 0; });
+        });
+        return {
+          caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
+          examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
+        };
+      })()
     : { caTotals: new Array(caCount).fill(0) as number[], examTotal: 0 };
 
   const studentTotalFromScores = parseFloat(reportScores.reduce((s, e) => s + (e.total || 0), 0).toFixed(1));

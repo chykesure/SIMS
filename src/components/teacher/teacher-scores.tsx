@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useAppStore } from '@/store/index'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -105,11 +105,6 @@ export function TeacherScores() {
 
   const primaryColor = tenant?.primaryColor || '#821329'
 
-  // Build dynamic CA columns based on assessment settings
-  // Field mapping MUST match mapCaScores logic: always read/write from START
-  //   caCount=1 -> [firstCa]
-  //   caCount=2 -> [firstCa, secondCa]
-  //   caCount=3 -> [firstCa, secondCa, thirdCa]
   const caColumns = useMemo(() => {
     const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = []
     const fields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
@@ -209,88 +204,95 @@ export function TeacherScores() {
     total: 0,
   })
 
-  const fetchStudents = async () => {
+  // Single consolidated effect: prevents race condition where two separate
+  // useEffects would flash 0-values on first parameter selection.
+  const fetchSeqRef = useRef(0)
+  useEffect(() => {
     if (!selectedClass) {
       setStudents([])
       setScores([])
       return
     }
-    try {
-      setLoadingStudents(true)
-      const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
-      const res = await fetch(`/api/students?class=${encodeURIComponent(classTitle)}`)
-      const json = await res.json()
-      const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
-      setStudents(studentData)
-
-      if (selectedSubject && sessionDisplay && selectedTerm) {
-        fetchExistingScores(classTitle, studentData)
-      } else {
-        setScores(studentData.map(makeEmptyScore))
-      }
-    } catch {
-      toast.error('Failed to load students')
-      setStudents([])
-      setScores([])
-    } finally {
-      setLoadingStudents(false)
-    }
-  }
-
-  const fetchExistingScores = async (classTitle: string, studentData: StudentInfo[]) => {
-    if (!selectedSubject) return
-    try {
-      const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
-      const params = new URLSearchParams({
-        session: sessionDisplay,
-        term: selectedTerm,
-        class: classTitle,
-        subject: subjectName,
-      })
-      const res = await fetch(`/api/portal/teacher/scores?${params}`)
-      const json = await res.json()
-      const existingScores = json.success ? json.data : []
-
-      setScores(
-        studentData.map((s) => {
-          const existing = existingScores.find(
-            (sc: Record<string, unknown>) => sc.fullname === s.fullname
-          )
-          return {
-            fullname: s.fullname,
-            studentId: s.id,
-            firstCa: existing ? Number(existing.firstCa) : 0,
-            secondCa: existing ? Number(existing.secondCa) : 0,
-            thirdCa: existing ? Number(existing.thirdCa) : 0,
-            exam: existing ? Number(existing.exam) : 0,
-            total: existing ? Number(existing.total) : 0,
-          }
-        })
-      )
-    } catch {
-      setScores(studentData.map(makeEmptyScore))
-    }
-  }
-
-  useEffect(() => {
-    fetchStudents()
-  }, [selectedClass])
-
-  useEffect(() => {
-    if (!selectedClass || !selectedSubject || students.length === 0) return
     const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
-    fetchExistingScores(classTitle, students)
-  }, [selectedSubject, selectedTerm, selectedSession])
+    const seq = ++fetchSeqRef.current
 
+    ;(async () => {
+      try {
+        setLoadingStudents(true)
+        const res = await fetch(`/api/students?class=${encodeURIComponent(classTitle)}`)
+        const json = await res.json()
+        const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
+
+        if (seq !== fetchSeqRef.current) return // stale request — bail out
+        setStudents(studentData)
+
+        if (selectedSubject && sessionDisplay && selectedTerm) {
+          const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
+          const params = new URLSearchParams({
+            session: sessionDisplay,
+            term: selectedTerm,
+            class: classTitle,
+            subject: subjectName,
+          })
+          const scoreRes = await fetch(`/api/portal/teacher/scores?${params}`)
+          const scoreJson = await scoreRes.json()
+
+          if (seq !== fetchSeqRef.current) return // stale — bail out
+          const existingScores = scoreJson.success ? scoreJson.data : []
+          const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
+
+          setScores(
+            studentData.map((s) => {
+              const existing = existingScores.find(
+                (sc: Record<string, unknown>) => sc.fullname === s.fullname
+              )
+              const row: ScoreRow = {
+                fullname: s.fullname,
+                studentId: s.id,
+                firstCa: 0,
+                secondCa: 0,
+                thirdCa: 0,
+                exam: existing ? Number(existing.exam) : 0,
+                total: 0,
+              }
+              for (let i = 0; i < assessment.caCount; i++) {
+                if (existing) {
+                  row[caFields[i]] = Number(existing[caFields[i]])
+                }
+              }
+              row.total = caFields.slice(0, assessment.caCount).reduce((sum, f) => sum + row[f], 0) + row.exam
+              return row
+            })
+          )
+        } else {
+          if (seq !== fetchSeqRef.current) return
+          setScores(studentData.map(makeEmptyScore))
+        }
+      } catch {
+        if (seq !== fetchSeqRef.current) return
+        toast.error('Failed to load students')
+        setStudents([])
+        setScores([])
+      } finally {
+        if (seq !== fetchSeqRef.current) return
+        setLoadingStudents(false)
+      }
+    })()
+  }, [selectedClass, selectedSubject, selectedTerm, selectedSession, assessment, sessionDisplay, classes, subjects])
+
+  // Only sum the CA fields that are currently visible based on caCount.
+  // This prevents ghost values in hidden CA fields from inflating the total.
   const computeTotal = (row: ScoreRow, changedField?: string, newVal?: number) => {
     const f = changedField
     const v = newVal ?? 0
-    return (
-      (f === 'firstCa' ? v : row.firstCa) +
-      (f === 'secondCa' ? v : row.secondCa) +
-      (f === 'thirdCa' ? v : row.thirdCa) +
-      (f === 'exam' ? v : row.exam)
-    )
+    const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
+    let sum = 0
+    for (let i = 0; i < assessment.caCount; i++) {
+      const field = caFields[i]
+      sum += (f === field ? v : row[field])
+    }
+    sum += (f === 'exam' ? v : row.exam)
+    return sum
   }
 
   const handleScoreChange = (
@@ -324,6 +326,17 @@ export function TeacherScores() {
       return
     }
 
+    // Zero out hidden CA fields and recompute total before saving.
+    const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
+    const cleanScores = scores.map((s) => {
+      const row = { ...s }
+      for (let i = assessment.caCount; i < 3; i++) {
+        row[caFields[i]] = 0
+      }
+      row.total = caFields.slice(0, assessment.caCount).reduce((sum, f) => sum + row[f], 0) + row.exam
+      return row
+    })
+
     try {
       setSaving(true)
       const res = await fetch('/api/portal/teacher/scores', {
@@ -337,12 +350,15 @@ export function TeacherScores() {
           term: selectedTerm,
           class: classTitle,
           subject: subjectName,
-          scores: scores.filter((s) => s.total > 0),
+          scores: cleanScores,
         }),
       })
       const json = await res.json()
       if (json.success) {
         toast.success(json.message || `Scores saved successfully (${json.data.created} new, ${json.data.updated} updated)`)
+        try {
+          await fetch(`/api/results/compute?${new URLSearchParams({ session: sessionDisplay, class: classTitle, term: selectedTerm })}`)
+        } catch { /* non-critical */ }
       } else {
         toast.error(json.message || 'Failed to save scores')
       }

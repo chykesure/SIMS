@@ -96,6 +96,18 @@ export async function POST(request: Request) {
     let created = 0;
     let updated = 0;
 
+    // Fetch ALL existing scores for this class/subject/term/session ONCE for efficiency
+    const existingScores = await db.examScore.findMany({
+      where: { tenantId, session, term, class: cls, subject },
+    });
+
+    // Build a map: normalized fullname → existing record (first match)
+    const existingMap = new Map<string, (typeof existingScores)[0]>();
+    for (const es of existingScores) {
+      const key = es.fullname.trim().toUpperCase();
+      if (!existingMap.has(key)) existingMap.set(key, es);
+    }
+
     for (const scoreData of scores) {
       const { fullname, firstCa, secondCa, thirdCa, exam } = scoreData;
 
@@ -107,22 +119,16 @@ export async function POST(request: Request) {
 
       const total = validFirstCa + validSecondCa + validThirdCa + validExam;
 
-      // Check for existing score
-      const existing = await db.examScore.findFirst({
-        where: {
-          tenantId,
-          session,
-          term,
-          class: cls,
-          fullname,
-          subject,
-        },
-      });
+      const canonicalName = String(fullname).trim();
+      const fullnameNorm = canonicalName.toUpperCase();
+      const existing = existingMap.get(fullnameNorm);
 
       if (existing) {
+        // Update existing record — also fix the fullname to canonical form
         await db.examScore.update({
           where: { id: existing.id },
           data: {
+            fullname: canonicalName,
             firstCa: validFirstCa,
             secondCa: validSecondCa,
             thirdCa: validThirdCa,
@@ -130,6 +136,14 @@ export async function POST(request: Request) {
             total,
           },
         });
+
+        // Delete any duplicate records (different case variations of same name)
+        for (const es of existingScores) {
+          if (es.id !== existing.id && es.fullname.trim().toUpperCase() === fullnameNorm) {
+            await db.examScore.delete({ where: { id: es.id } });
+          }
+        }
+
         updated++;
       } else {
         await db.examScore.create({
@@ -138,7 +152,7 @@ export async function POST(request: Request) {
             session,
             class: cls,
             term,
-            fullname,
+            fullname: canonicalName,
             subject,
             firstCa: validFirstCa,
             secondCa: validSecondCa,
@@ -148,6 +162,7 @@ export async function POST(request: Request) {
           },
         });
         created++;
+        existingMap.set(fullnameNorm, { id: "__new__" } as any); // prevent duplicates in same batch
       }
     }
 

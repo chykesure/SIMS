@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import {
   createLoginSecurityCheck,
   sanitizeInput,
@@ -10,24 +11,18 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { email, password } = body;
 
-    // Sanitize inputs
     const sanitizedEmail = sanitizeInput(email, "email");
     const sanitizedPassword = sanitizeInput(password, "password");
 
     if (!sanitizedEmail || !sanitizedPassword) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Email and password are required",
-        },
+        { success: false, message: "Email and password are required" },
         { status: 400 }
       );
     }
 
-    // ---- Security: Create login security check ----
     const loginSecurity = createLoginSecurityCheck(sanitizedEmail, request);
 
-    // ---- Security: Pre-check rate limit ----
     const preCheck = loginSecurity.preCheck();
     if (!preCheck.allowed) {
       return NextResponse.json(
@@ -41,57 +36,64 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find user by email (also support regNo for student login)
+    // Step 1: Try finding User by email first (handles returning students & admin/teacher)
     let user = await db.user.findFirst({
       where: { email: sanitizedEmail },
     });
 
-    // If not found by email, try looking up a student by regNo and match their user
+    // Step 2: If no user found, try student regNo lookup (case-insensitive via raw SQL)
     if (!user) {
       const tenantId = request.headers.get("x-tenant-id");
+      const searchRegNo = sanitizedEmail.trim().toUpperCase();
 
-      // Try to find student by regNo
-      const student = tenantId
-        ? await db.student.findFirst({
-          where: { regNo: sanitizedEmail, tenantId },
-        })
-        : await db.student.findFirst({
-          where: { regNo: sanitizedEmail },
-        });
+      let studentRow: any = null;
 
-      if (student) {
-        // Look for an existing User linked to this student
+      if (tenantId) {
+        const rows = await db.$queryRaw`
+          SELECT * FROM "Student" 
+          WHERE UPPER(TRIM("regNo")) = ${searchRegNo} AND "tenantId" = ${tenantId} 
+          LIMIT 1
+        `;
+        studentRow = (rows as any[])[0] || null;
+      } else {
+        const rows = await db.$queryRaw`
+          SELECT * FROM "Student" 
+          WHERE UPPER(TRIM("regNo")) = ${searchRegNo} 
+          LIMIT 1
+        `;
+        studentRow = (rows as any[])[0] || null;
+      }
+
+      if (studentRow) {
+        // Look for existing User linked to this student
         const existingUser = tenantId
           ? await db.user.findFirst({
-            where: { studentId: student.id, tenantId },
-          })
+              where: { studentId: studentRow.id, tenantId },
+            })
           : await db.user.findFirst({
-            where: { studentId: student.id },
-          });
+              where: { studentId: studentRow.id },
+            });
 
         if (existingUser) {
           user = existingUser;
         } else {
-          // 🔥 AUTO-CREATE: If student exists but no User account, create one
-          const defaultPassword = student.regNo.toLowerCase();
+          // AUTO-CREATE User account on first login
+          const defaultPassword = studentRow.regNo.toLowerCase();
 
-          // Only auto-create if the password matches the default
-          if (sanitizedPassword === defaultPassword) {
+          if (sanitizedPassword.toLowerCase() === defaultPassword.toLowerCase()) {
             user = await db.user.create({
               data: {
-                email: sanitizedEmail,
-                username: student.fullname || `Student-${student.regNo}`,
+                email: studentRow.regNo,
+                username: studentRow.fullname || `Student-${studentRow.regNo}`,
                 password: defaultPassword,
                 role: "STUDENT",
-                studentId: student.id,
-                tenantId: student.tenantId,
-                imageUrl: student.imageUrl || undefined,
+                studentId: studentRow.id,
+                tenantId: studentRow.tenantId,
+                imageUrl: studentRow.imageUrl || undefined,
               },
             });
           } else {
-            // Student exists, User doesn't exist yet — wrong password
             await loginSecurity.onFailed("User not found (no account)");
-
             return NextResponse.json(
               {
                 success: false,
@@ -106,87 +108,57 @@ export async function POST(request: Request) {
     }
 
     if (!user) {
-      // ---- Security: Log failed attempt ----
       await loginSecurity.onFailed("User not found");
-
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid email or password",
-        },
+        { success: false, message: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    // Plain text password comparison (for demo with SQLite)
-    if (user.password !== sanitizedPassword) {
-      // ---- Security: Log failed attempt ----
+    // Password comparison (case-insensitive)
+    if (user.password.toLowerCase() !== sanitizedPassword.toLowerCase()) {
       await loginSecurity.onFailed("Invalid password");
-
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid email or password",
-        },
+        { success: false, message: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    // Fetch tenant info
+    // Fetch tenant
     const tenant = await db.tenant.findUnique({
       where: { id: user.tenantId },
     });
 
     if (!tenant) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Tenant not found",
-        },
+        { success: false, message: "Tenant not found" },
         { status: 500 }
       );
     }
 
-    // ⛔ CHECK TENANT STATUS — Block login if not approved
     if (tenant.status === "pending") {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Your school account is still pending approval. Please wait for the administrator to review and approve your registration.",
-          code: "TENANT_PENDING",
-        },
+        { success: false, message: "Your school account is still pending approval.", code: "TENANT_PENDING" },
         { status: 403 }
       );
     }
 
     if (tenant.status === "rejected") {
       return NextResponse.json(
-        {
-          success: false,
-          message: tenant.rejectionReason
-            ? `Your school registration was rejected: ${tenant.rejectionReason}`
-            : "Your school registration was rejected. Please contact support for more information.",
-          code: "TENANT_REJECTED",
-        },
+        { success: false, message: tenant.rejectionReason || "Your school registration was rejected.", code: "TENANT_REJECTED" },
         { status: 403 }
       );
     }
 
     if (tenant.status === "suspended") {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Your school account has been suspended. Please contact the administrator for assistance.",
-          code: "TENANT_SUSPENDED",
-        },
+        { success: false, message: "Your school account has been suspended.", code: "TENANT_SUSPENDED" },
         { status: 403 }
       );
     }
 
-    // ---- Security: Log successful login ----
     await loginSecurity.onSuccess();
 
-    // Create login history entry
     await db.loginHistory.create({
       data: {
         tenantId: user.tenantId,
@@ -198,7 +170,6 @@ export async function POST(request: Request) {
       },
     });
 
-    // Return user data (excluding password) and tenant data
     return NextResponse.json(
       {
         success: true,
@@ -238,11 +209,9 @@ export async function POST(request: Request) {
     );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
+    console.error("LOGIN ERROR:", error);
     return NextResponse.json(
-      {
-        success: false,
-        message: `Login failed: ${message}`,
-      },
+      { success: false, message: `Login failed: ${message}` },
       { status: 500 }
     );
   }

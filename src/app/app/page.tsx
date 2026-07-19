@@ -68,7 +68,6 @@ import { VoucherView } from "@/components/vouchers/voucher-view";
 import SessionSelectPage from "@/components/auth/session-select-page";
 import SchoolProfilePage from "@/components/settings/school-profile";
 import ScoreImportPage from "@/components/settings/score-import";
-
 import { TeacherAiAssistant } from "@/components/teacher/teacher-ai-assistant";
 import ProfileView from "@/components/settings/profile-view";
 
@@ -158,6 +157,8 @@ export default function Home() {
           return <ProfileView />;
         case "teacher-results":
           return <ResultView />;
+        case "teacher-broadsheet":
+          return <BroadsheetView />;
         default:
           return <TeacherDashboard />;
       }
