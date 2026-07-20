@@ -1,4 +1,3 @@
-//src/app/page.tsx
 "use client";
 
 import "@/lib/fetch-interceptor";
@@ -71,6 +70,171 @@ import ScoreImportPage from "@/components/settings/score-import";
 import { TeacherAiAssistant } from "@/components/teacher/teacher-ai-assistant";
 import ProfileView from "@/components/settings/profile-view";
 
+// ============================================================
+// PORTAL CONTENT COMPONENTS (proper components, not functions!)
+// This ensures hooks from child components are scoped correctly.
+// ============================================================
+
+function StudentPortalContent() {
+  const { currentPage } = useAppStore();
+  switch (currentPage) {
+    case "dashboard":
+    case "student-dashboard":
+      return <StudentDashboard />;
+    case "student-results":
+      return <StudentResults />;
+    case "student-fees":
+      return <StudentFees />;
+    case "student-assignments":
+      return <StudentAssignments />;
+    case "student-announcements":
+      return <StudentAnnouncements />;
+    default:
+      return <StudentDashboard />;
+  }
+}
+
+function TeacherPortalContent() {
+  const { currentPage, selectedSchoolId } = useAppStore();
+  switch (currentPage) {
+    case "dashboard":
+      return <TeacherDashboard />;
+    case "teacher-classes":
+      return <TeacherClasses />;
+    case "teacher-scores":
+      return <TeacherScores />;
+    case "teacher-assignments":
+      return <TeacherAssignments />;
+    case "teacher-announcements":
+      return <TeacherAnnouncements />;
+    case "teacher-add-student":
+      return <StudentAddView />;
+    case "teacher-students":
+      return <StudentListView />;
+    case "teacher-subjects":
+      return <SubjectListView />;
+    case "teacher-ai-assistant":
+      return <TeacherAiAssistant />;
+    case "teacher-profile":
+      return <ProfileView />;
+    case "teacher-results":
+      return <ResultView />;
+    case "teacher-broadsheet":
+      return <BroadsheetView />;
+    default:
+      return <TeacherDashboard />;
+  }
+}
+
+function ParentPortalContent() {
+  const { currentPage } = useAppStore();
+  switch (currentPage) {
+    case "dashboard":
+      return <ParentDashboard />;
+    case "parent-results":
+      return <ParentResults />;
+    case "parent-fees":
+      return <ParentFees />;
+    case "parent-announcements":
+      return <ParentAnnouncements />;
+    default:
+      return <ParentDashboard />;
+  }
+}
+
+function DevPortalContent() {
+  const { currentPage, selectedSchoolId } = useAppStore();
+  switch (currentPage) {
+    case "dev-dashboard":
+      return <DevDashboard />;
+    case "dev-schools":
+      return <DevSchools />;
+    case "dev-plans":
+      return <DevPlans />;
+    case "dev-payments":
+      return <DevPaymentVerify />;
+    case "dev-sessions":
+      return <DevSessions />;
+    case "dev-school-detail":
+      return selectedSchoolId ? <DevSchoolDetail schoolId={selectedSchoolId} /> : <DevDashboard />;
+    case "dev-activity-log":
+      return <DevActivityLog />;
+    case "dev-security":
+      return <DevSecurity />;
+    case "dev-settings":
+      return <DevSettings />;
+    default:
+      return <DevDashboard />;
+  }
+}
+
+function AdminPortalContent() {
+  const { currentPage } = useAppStore();
+  switch (currentPage) {
+    case "dashboard":
+      return <DashboardView />;
+    case "student-add":
+      return <StudentAddView />;
+    case "students":
+      return <StudentListView />;
+    case "teachers":
+      return <TeacherListView />;
+    case "subjects":
+      return <SubjectListView />;
+    case "classes":
+      return <ClassListView />;
+    case "sessions":
+      return <SessionListView />;
+    case "exams":
+      return <ExamView />;
+    case "results":
+      return <ResultView />;
+    case "grading":
+      return <GradingView />;
+    case "card-settings":
+      return <CardSettingsView />;
+    case "broadsheet":
+      return <BroadsheetView />;
+    case "remarks":
+      return <RemarksView />;
+    case "signatures":
+      return <SignaturesView />;
+    case "class-position":
+      return <ClassPositionView />;
+    case "subject-position":
+      return <SubjectPositionView />;
+    case "users":
+      return <UserListView />;
+    case "parents":
+      return <ParentListView />;
+    case "assessment-settings":
+      return <AssessmentSettingsView />;
+    case "subscription":
+      return <SubscriptionPage />;
+    case "finance":
+      return <FinanceView />;
+    case "budgets":
+      return <BudgetView />;
+    case "inventory":
+      return <InventoryView />;
+    case "vouchers":
+      return <VoucherView />;
+    case "classroom":
+      return <ClassroomView />;
+    case "profile":
+      return <ProfileView />;
+    case "school-profile":
+      return <SchoolProfilePage />;
+    case "score-import":
+      return <ScoreImportPage />;
+    default:
+      return <DashboardView />;
+  }
+}
+
+// ============================================================
+// MAIN PAGE
+// ============================================================
 
 export default function Home() {
   const { currentPage, isAuthenticated, isSuperAdmin, isImpersonating, impersonatedTenantName, sidebarOpen, tenant, user, selectedSchoolId, stopImpersonation } = useAppStore();
@@ -95,30 +259,12 @@ export default function Home() {
   // STUDENT PORTAL
   // ============================
   if ((user?.role || "").toUpperCase() === "STUDENT") {
-    const renderStudentView = () => {
-      switch (currentPage) {
-        case "dashboard":
-        case "student-dashboard":
-          return <StudentDashboard />;
-        case "student-results":
-          return <StudentResults />;
-        case "student-fees":
-          return <StudentFees />;
-        case "student-assignments":
-          return <StudentAssignments />;
-        case "student-announcements":
-          return <StudentAnnouncements />;
-        default:
-          return <StudentDashboard />;
-      }
-    };
-
     return (
       <div className="flex min-h-screen bg-muted/30">
         <StudentSidebar />
         <div className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[260px]" : "lg:ml-[68px]"}`}>
           <StudentHeader />
-          <main className="flex-1 p-4 md:p-6">{renderStudentView()}</main>
+          <main className="flex-1 p-4 md:p-6"><StudentPortalContent /></main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
               © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Student Portal
@@ -133,42 +279,11 @@ export default function Home() {
   // TEACHER PORTAL
   // ============================
   if ((user?.role || "").toUpperCase() === "TEACHER") {
-    const renderTeacherView = () => {
-      switch (currentPage) {
-        case "dashboard":
-          return <TeacherDashboard />;
-        case "teacher-classes":
-          return <TeacherClasses />;
-        case "teacher-scores":
-          return <TeacherScores />;
-        case "teacher-assignments":
-          return <TeacherAssignments />;
-        case "teacher-announcements":
-          return <TeacherAnnouncements />;
-        case "teacher-add-student":
-          return <StudentAddView />;
-        case "teacher-students":
-          return <StudentListView />;
-        case "teacher-subjects":
-          return <SubjectListView />;
-        case "teacher-ai-assistant":
-          return <TeacherAiAssistant />;
-        case "teacher-profile":
-          return <ProfileView />;
-        case "teacher-results":
-          return <ResultView />;
-        case "teacher-broadsheet":
-          return <BroadsheetView />;
-        default:
-          return <TeacherDashboard />;
-      }
-    };
-
     return (
       <div className="flex min-h-screen">
         <TeacherSidebar />
         <div className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"}`}>
-          <main className="flex-1 p-4 md:p-6">{renderTeacherView()}</main>
+          <main className="flex-1 p-4 md:p-6"><TeacherPortalContent /></main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
               © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Teacher Portal
@@ -183,26 +298,11 @@ export default function Home() {
   // PARENT PORTAL
   // ============================
   if ((user?.role || "").toUpperCase() === "PARENT") {
-    const renderParentView = () => {
-      switch (currentPage) {
-        case "dashboard":
-          return <ParentDashboard />;
-        case "parent-results":
-          return <ParentResults />;
-        case "parent-fees":
-          return <ParentFees />;
-        case "parent-announcements":
-          return <ParentAnnouncements />;
-        default:
-          return <ParentDashboard />;
-      }
-    };
-
     return (
       <div className="flex min-h-screen">
         <ParentSidebar />
         <div className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"}`}>
-          <main className="flex-1 p-4 md:p-6">{renderParentView()}</main>
+          <main className="flex-1 p-4 md:p-6"><ParentPortalContent /></main>
           <footer className="border-t bg-white px-6 py-3 mt-auto">
             <p className="text-center text-xs text-muted-foreground">
               © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Parent Portal
@@ -217,40 +317,14 @@ export default function Home() {
   // SUPER ADMIN / DEVELOPER DASHBOARD
   // ============================
   if (isSuperAdmin) {
-    const renderDevView = () => {
-      switch (currentPage) {
-        case "dev-dashboard":
-          return <DevDashboard />;
-        case "dev-schools":
-          return <DevSchools />;
-        case "dev-plans":
-          return <DevPlans />;
-        case "dev-payments":
-          return <DevPaymentVerify />;
-        case "dev-sessions":
-          return <DevSessions />;
-        case "dev-school-detail":
-          return selectedSchoolId ? <DevSchoolDetail schoolId={selectedSchoolId} /> : <DevDashboard />;
-        case "dev-activity-log":
-          return <DevActivityLog />;
-        case "dev-security":
-          return <DevSecurity />;
-        case "dev-settings":
-          return <DevSettings />;
-        default:
-          return <DevDashboard />;
-      }
-    };
-
     return (
       <div className="flex min-h-screen bg-muted/30">
         <DevSidebar />
         <div
-          className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"
-            }`}
+          className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"}`}
         >
           <DevHeader />
-          <main className="flex-1 p-4 md:p-6">{renderDevView()}</main>
+          <main className="flex-1 p-4 md:p-6"><DevPortalContent /></main>
           <footer className="border-t border-slate-800/60 bg-slate-950/80 px-6 py-3 mt-auto">
             <p className="text-center text-xs text-slate-500">
               © {new Date().getFullYear()} SIMS — Platform Admin Dashboard
@@ -264,75 +338,11 @@ export default function Home() {
   // ============================
   // SCHOOL ADMIN DASHBOARD
   // ============================
-  const renderView = () => {
-    switch (currentPage) {
-      case "dashboard":
-        return <DashboardView />;
-      case "student-add":
-        return <StudentAddView />;
-      case "students":
-        return <StudentListView />;
-      case "teachers":
-        return <TeacherListView />;
-      case "subjects":
-        return <SubjectListView />;
-      case "classes":
-        return <ClassListView />;
-      case "sessions":
-        return <SessionListView />;
-      case "exams":
-        return <ExamView />;
-      case "results":
-        return <ResultView />;
-      case "grading":
-        return <GradingView />;
-      case "card-settings":
-        return <CardSettingsView />;
-      case "broadsheet":
-        return <BroadsheetView />;
-      case "remarks":
-        return <RemarksView />;
-      case "signatures":
-        return <SignaturesView />;
-      case "class-position":
-        return <ClassPositionView />;
-      case "subject-position":
-        return <SubjectPositionView />;
-      case "users":
-        return <UserListView />;
-      case "parents":
-        return <ParentListView />;
-      case "assessment-settings":
-        return <AssessmentSettingsView />;
-      case "subscription":
-        return <SubscriptionPage />;
-      case "finance":
-        return <FinanceView />;
-      case "budgets":
-        return <BudgetView />;
-      case "inventory":
-        return <InventoryView />;
-      case "vouchers":
-        return <VoucherView />;
-      case "classroom":
-        return <ClassroomView />;
-      case "profile":
-        return <ProfileView />;
-      case "school-profile":
-        return <SchoolProfilePage />;
-      case "score-import":
-        return <ScoreImportPage />;
-      default:
-        return <DashboardView />;
-    }
-  };
-
   return (
     <div className="flex min-h-screen">
       <Sidebar />
       <div
-        className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"
-          }`}
+        className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-[240px]" : "lg:ml-16"}`}
       >
         {/* Impersonation Banner */}
         {isImpersonating && (
@@ -352,7 +362,7 @@ export default function Home() {
           </div>
         )}
         <Header />
-        <main className="flex-1 p-4 md:p-6">{renderView()}</main>
+        <main className="flex-1 p-4 md:p-6"><AdminPortalContent /></main>
         <footer className="border-t bg-white px-6 py-3">
           <p className="text-center text-xs text-muted-foreground">
             © {new Date().getFullYear()} {tenant?.name || "SIMS"} — Complete School Management

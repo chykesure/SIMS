@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-function getTenantId(request: Request): string {
-  return request.headers.get("x-tenant-id") || "";
-}
-
 function getUserId(request: Request): string {
   return request.headers.get("x-user-id") || "";
 }
@@ -12,15 +8,7 @@ function getUserId(request: Request): string {
 // GET /api/portal/student/results?session=&term= — Fetch student exam results
 export async function GET(request: Request) {
   try {
-    const tenantId = getTenantId(request);
     const userId = getUserId(request);
-
-    if (!tenantId) {
-      return NextResponse.json(
-        { success: false, message: "Tenant ID required" },
-        { status: 400 }
-      );
-    }
 
     if (!userId) {
       return NextResponse.json(
@@ -29,20 +17,23 @@ export async function GET(request: Request) {
       );
     }
 
-    // Find user and student
-    const user = await db.user.findFirst({
-      where: { id: userId, tenantId },
+    // Find user by ID only (UUID is globally unique)
+    const user = await db.user.findUnique({
+      where: { id: userId },
     });
 
-    if (!user || user.role !== "STUDENT" || !user.studentId) {
+    if (!user || (user.role || "").toUpperCase() !== "STUDENT" || !user.studentId) {
       return NextResponse.json(
         { success: false, message: "Access denied" },
         { status: 403 }
       );
     }
 
+    // Use the user's actual tenantId from the database
+    const userTenantId = user.tenantId;
+
     const student = await db.student.findFirst({
-      where: { id: user.studentId, tenantId },
+      where: { id: user.studentId, tenantId: userTenantId },
     });
 
     if (!student) {
@@ -58,7 +49,7 @@ export async function GET(request: Request) {
 
     // Build where clause for exam scores
     const scoreWhere: Record<string, unknown> = {
-      tenantId,
+      tenantId: userTenantId,
       fullname: student.fullname,
       class: student.class,
     };
@@ -104,7 +95,7 @@ export async function GET(request: Request) {
     // Fetch student record for position data
     const studentRecord = await db.studentRecord.findFirst({
       where: {
-        tenantId,
+        tenantId: userTenantId,
         fullname: student.fullname,
         class: student.class,
         session: resultSession,
@@ -115,7 +106,7 @@ export async function GET(request: Request) {
     // Fetch class position
     const classPosition = await db.classPosition.findFirst({
       where: {
-        tenantId,
+        tenantId: userTenantId,
         fullname: student.fullname,
         class: student.class,
         session: resultSession,
@@ -129,7 +120,7 @@ export async function GET(request: Request) {
     // ============================================================
     const allClassScores = await db.examScore.findMany({
       where: {
-        tenantId,
+        tenantId: userTenantId,
         class: student.class,
         session: resultSession,
         term: resultTerm,
@@ -183,7 +174,7 @@ export async function GET(request: Request) {
 
     // Get available sessions and terms for filters
     const distinctSessions = await db.examScore.findMany({
-      where: { tenantId, fullname: student.fullname, class: student.class },
+      where: { tenantId: userTenantId, fullname: student.fullname, class: student.class },
       select: { session: true, term: true },
       distinct: ["session", "term"],
       orderBy: { session: "desc" },
@@ -208,11 +199,11 @@ export async function GET(request: Request) {
         totalStudents: studentRecord?.totalStudents || classPosition?.totalStudents || 0,
         studentRecord: studentRecord
           ? {
-              attendance: studentRecord.attendance,
-              subjectsPassed: studentRecord.subjectsPassed,
-              subjectsFailed: studentRecord.subjectsFailed,
-              percentage: studentRecord.percentage,
-            }
+            attendance: studentRecord.attendance,
+            subjectsPassed: studentRecord.subjectsPassed,
+            subjectsFailed: studentRecord.subjectsFailed,
+            percentage: studentRecord.percentage,
+          }
           : null,
         availableFilters: distinctSessions.map(s => ({ session: s.session, term: s.term })),
       },

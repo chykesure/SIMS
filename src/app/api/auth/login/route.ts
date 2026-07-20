@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { Prisma } from "@prisma/client";
 import {
   createLoginSecurityCheck,
   sanitizeInput,
@@ -28,7 +27,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: preCheck.reason || "Too many login attempts. Please try again later.",
+          message: preCheck.reason || "Too many login attempts.",
           code: "RATE_LIMITED",
           lockoutMinutes: preCheck.lockoutMinutes,
         },
@@ -36,74 +35,79 @@ export async function POST(request: Request) {
       );
     }
 
-    // Step 1: Try finding User by email first (handles returning students & admin/teacher)
+    // Step 1: Find user by email (handles returning students, admin, teacher)
     let user = await db.user.findFirst({
       where: { email: sanitizedEmail },
     });
 
-    // Step 2: If no user found, try student regNo lookup (case-insensitive via raw SQL)
+    // Step 2: If no user found, try student regNo lookup
     if (!user) {
       const tenantId = request.headers.get("x-tenant-id");
-      const searchRegNo = sanitizedEmail.trim().toUpperCase();
+      const trimmedReg = sanitizedEmail.trim();
 
-      let studentRow: any = null;
+      // Try 3 variations: exact, lowercase, uppercase
+      let student = await db.student.findFirst({
+        where: { regNo: trimmedReg },
+      });
 
-      if (tenantId) {
-        const rows = await db.$queryRaw`
-          SELECT * FROM "Student" 
-          WHERE UPPER(TRIM("regNo")) = ${searchRegNo} AND "tenantId" = ${tenantId} 
-          LIMIT 1
-        `;
-        studentRow = (rows as any[])[0] || null;
-      } else {
-        const rows = await db.$queryRaw`
-          SELECT * FROM "Student" 
-          WHERE UPPER(TRIM("regNo")) = ${searchRegNo} 
-          LIMIT 1
-        `;
-        studentRow = (rows as any[])[0] || null;
+      if (!student) {
+        student = await db.student.findFirst({
+          where: { regNo: trimmedReg.toLowerCase() },
+        });
       }
 
-      if (studentRow) {
+      if (!student) {
+        student = await db.student.findFirst({
+          where: { regNo: trimmedReg.toUpperCase() },
+        });
+      }
+
+      console.log("[LOGIN DEBUG] Looking for student with regNo:", trimmedReg, "| Found:", student?.id || "NOT FOUND");
+
+      if (student) {
         // Look for existing User linked to this student
         const existingUser = tenantId
           ? await db.user.findFirst({
-              where: { studentId: studentRow.id, tenantId },
-            })
+            where: { studentId: student.id, tenantId },
+          })
           : await db.user.findFirst({
-              where: { studentId: studentRow.id },
-            });
+            where: { studentId: student.id },
+          });
 
         if (existingUser) {
           user = existingUser;
         } else {
-          // AUTO-CREATE User account on first login
-          const defaultPassword = studentRow.regNo.toLowerCase();
+          // AUTO-CREATE User on first login
+          const defaultPassword = student.regNo.toLowerCase();
 
           if (sanitizedPassword.toLowerCase() === defaultPassword.toLowerCase()) {
             user = await db.user.create({
               data: {
-                email: studentRow.regNo,
-                username: studentRow.fullname || `Student-${studentRow.regNo}`,
+                email: student.regNo,
+                username: student.fullname || `Student-${student.regNo}`,
                 password: defaultPassword,
                 role: "STUDENT",
-                studentId: studentRow.id,
-                tenantId: studentRow.tenantId,
-                imageUrl: studentRow.imageUrl || undefined,
+                studentId: student.id,
+                tenantId: student.tenantId,
+                imageUrl: student.imageUrl || undefined,
               },
             });
+            console.log("[LOGIN DEBUG] Auto-created user for student:", student.regNo);
           } else {
+            console.log("[LOGIN DEBUG] Wrong password for student:", student.regNo, "| typed:", sanitizedPassword, "| expected:", defaultPassword);
             await loginSecurity.onFailed("User not found (no account)");
             return NextResponse.json(
               {
                 success: false,
-                message: "No login account found for this student. Please contact your school admin to create your login credentials.",
+                message: "No login account found for this student. Please contact your school admin.",
                 code: "NO_USER_ACCOUNT",
               },
               { status: 401 }
             );
           }
         }
+      } else {
+        console.log("[LOGIN DEBUG] No student found for:", trimmedReg);
       }
     }
 
@@ -115,16 +119,47 @@ export async function POST(request: Request) {
       );
     }
 
-    // Password comparison (case-insensitive)
+    // Password check
     if (user.password.toLowerCase() !== sanitizedPassword.toLowerCase()) {
-      await loginSecurity.onFailed("Invalid password");
-      return NextResponse.json(
-        { success: false, message: "Invalid email or password" },
-        { status: 401 }
-      );
+      // For student users: fallback to default password (regNo) and auto-fix
+      if (user.studentId) {
+        const student = await db.student.findUnique({
+          where: { id: user.studentId },
+        });
+        if (student) {
+          const defaultPw = student.regNo.toLowerCase();
+          if (sanitizedPassword.toLowerCase() === defaultPw) {
+            // Update stored password to match the default
+            await db.user.update({
+              where: { id: user.id },
+              data: { password: defaultPw, role: "STUDENT" },
+            });
+            // Continue to login (don't return error)
+          } else {
+            console.log("[LOGIN DEBUG] Student password mismatch. Stored:", user.password, "| Typed:", sanitizedPassword, "| Default would be:", defaultPw);
+            await loginSecurity.onFailed("Invalid password");
+            return NextResponse.json(
+              { success: false, message: "Invalid email or password" },
+              { status: 401 }
+            );
+          }
+        } else {
+          await loginSecurity.onFailed("Invalid password");
+          return NextResponse.json(
+            { success: false, message: "Invalid email or password" },
+            { status: 401 }
+          );
+        }
+      } else {
+        console.log("[LOGIN DEBUG] Password mismatch for user:", user.email);
+        await loginSecurity.onFailed("Invalid password");
+        return NextResponse.json(
+          { success: false, message: "Invalid email or password" },
+          { status: 401 }
+        );
+      }
     }
 
-    // Fetch tenant
     const tenant = await db.tenant.findUnique({
       where: { id: user.tenantId },
     });
@@ -145,14 +180,14 @@ export async function POST(request: Request) {
 
     if (tenant.status === "rejected") {
       return NextResponse.json(
-        { success: false, message: tenant.rejectionReason || "Your school registration was rejected.", code: "TENANT_REJECTED" },
+        { success: false, message: tenant.rejectionReason || "Registration rejected.", code: "TENANT_REJECTED" },
         { status: 403 }
       );
     }
 
     if (tenant.status === "suspended") {
       return NextResponse.json(
-        { success: false, message: "Your school account has been suspended.", code: "TENANT_SUSPENDED" },
+        { success: false, message: "School account suspended.", code: "TENANT_SUSPENDED" },
         { status: 403 }
       );
     }
@@ -209,7 +244,7 @@ export async function POST(request: Request) {
     );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
-    console.error("LOGIN ERROR:", error);
+    console.error("[LOGIN ERROR]", error);
     return NextResponse.json(
       { success: false, message: `Login failed: ${message}` },
       { status: 500 }

@@ -429,7 +429,7 @@ export function StudentResults() {
   /* ======== DYNAMIC CA COLUMNS ======== */
   const caCount = schoolSettings.caCount || 1
 
-   const caLabels = useMemo(() => {
+  const caLabels = useMemo(() => {
     if (caCount === 1) return ["CA"]
     return Array.from({ length: caCount }, (_, i) => `CA${i + 1}`)
   }, [caCount])
@@ -478,6 +478,20 @@ export function StudentResults() {
     printWindow.addEventListener("afterprint", () => printWindow.close())
   }
 
+
+  const RC = buildRCStyles(primaryColor)
+
+  /* ===== CA column totals for report card ===== */
+  const caColumnTotals = useMemo(() => {
+    if (!data || data.scores.length === 0) return new Array(caCount).fill(0) as number[]
+    const totals: number[] = new Array(caCount).fill(0)
+    data.scores.forEach((sc) => {
+      const mapped = mapCaScores(sc, caCount)
+      mapped.forEach((val, i) => { totals[i] += val || 0 })
+    })
+    return totals.map(t => parseFloat(t.toFixed(1)))
+  }, [data, caCount])
+
   if (error) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
@@ -495,19 +509,6 @@ export function StudentResults() {
       </div>
     )
   }
-
-  const RC = buildRCStyles(primaryColor)
-
-  /* ===== CA column totals for report card ===== */
-  const caColumnTotals = useMemo(() => {
-    if (!data || data.scores.length === 0) return new Array(caCount).fill(0) as number[]
-    const totals: number[] = new Array(caCount).fill(0)
-    data.scores.forEach((sc) => {
-      const mapped = mapCaScores(sc, caCount)
-      mapped.forEach((val, i) => { totals[i] += val || 0 })
-    })
-    return totals.map(t => parseFloat(t.toFixed(1)))
-  }, [data, caCount])
 
   return (
     <div className="space-y-6">

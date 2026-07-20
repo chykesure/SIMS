@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       );
     }
 
-    if (user.role !== "STUDENT") {
+        if ((user.role || "").toUpperCase() !== "STUDENT") {
       return NextResponse.json(
         { success: false, message: "Access denied. Not a student account." },
         { status: 403 }

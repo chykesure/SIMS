@@ -29,6 +29,10 @@ import {
   XCircle,
   AlertTriangle,
   KeyRound,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -118,6 +122,75 @@ interface ImportResult {
 const BASIC_OPTIONS = ["None", "Basic7", "Basic8", "Basic9"];
 const DEPARTMENT_OPTIONS = ["None", "Science", "Art", "Commerce"];
 
+// ───────────────────────────────────────────────────
+// RegNo Cell with Show/Copy buttons
+// ───────────────────────────────────────────────────
+function RegNoCell({ regNo, compact = false }: { regNo: string; compact?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    if (!regNo) return;
+    try {
+      await navigator.clipboard.writeText(regNo);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = regNo;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    toast.success("Reg No copied!");
+    setTimeout(() => setCopied(false), 2000);
+  }, [regNo]);
+
+  if (!regNo) {
+    return <span className="text-xs text-muted-foreground italic">—</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <span
+        className={`font-mono text-xs ${compact ? "text-[11px]" : ""} ${
+          visible ? "" : "blur-[4px] select-none hover:blur-[2px] transition-all cursor-pointer"
+        }`}
+        onClick={() => setVisible(true)}
+        title={visible ? regNo : "Click to reveal reg no"}
+      >
+        {regNo}
+      </span>
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="p-1 rounded hover:bg-muted transition-colors shrink-0"
+        title={visible ? "Hide reg no" : "Show reg no"}
+      >
+        {visible ? (
+          <EyeOff className="size-3 text-muted-foreground" />
+        ) : (
+          <Eye className="size-3 text-muted-foreground" />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className={`p-1 rounded transition-colors shrink-0 ${
+          copied ? "text-emerald-600" : "hover:bg-muted"
+        }`}
+        title={copied ? "Copied!" : "Copy reg no"}
+      >
+        {copied ? (
+          <Check className="size-3" />
+        ) : (
+          <Copy className="size-3 text-muted-foreground" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 // Skeleton row for loading state
 function TableSkeleton({ rows = 5 }: { rows?: number }) {
   return (
@@ -200,11 +273,40 @@ export default function StudentListView() {
   const [deleteAllConfirmText, setDeleteAllConfirmText] = useState("");
   const [deletingAll, setDeletingAll] = useState(false);
 
-  // Client-side filtered students (gender filter applied on top of server results)
+  // ─── FIXED: Client-side filtering (search + gender) ───
   const filteredStudents = useMemo(() => {
-    if (genderFilter === "all") return students;
-    return students.filter((s) => s.gender === genderFilter);
-  }, [students, genderFilter]);
+    let result = students;
+
+    // Client-side search filter — searches across all relevant fields
+    if (search) {
+      const query = search.toLowerCase().trim();
+      const terms = query.split(/\s+/);
+      result = result.filter((s) => {
+        const searchable = [
+          s.fullname,
+          s.regNo,
+          s.class,
+          s.basic,
+          s.department,
+          s.parentNo,
+          s.stateOfOrigin,
+          s.lga,
+          s.gender,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return terms.every((term) => searchable.includes(term));
+      });
+    }
+
+    // Gender filter
+    if (genderFilter !== "all") {
+      result = result.filter((s) => s.gender === genderFilter);
+    }
+
+    return result;
+  }, [students, search, genderFilter]);
 
   // Stats computed from filtered students
   const stats = useMemo(() => {
@@ -218,12 +320,11 @@ export default function StudentListView() {
   // Check if any filters are active
   const hasActiveFilters = search || classFilter !== "all" || genderFilter !== "all";
 
-  // Fetch students
+  // ─── FIXED: Fetch students WITHOUT search param (search is now client-side) ───
   const fetchStudents = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (search) params.set("q", search);
       if (classFilter && classFilter !== "all") params.set("class", classFilter);
 
       const url = params.toString()
@@ -241,7 +342,7 @@ export default function StudentListView() {
     } finally {
       setLoading(false);
     }
-  }, [search, classFilter]);
+  }, [classFilter]);
 
   // Fetch classes for dropdown
   useEffect(() => {
@@ -259,15 +360,15 @@ export default function StudentListView() {
     fetchClasses();
   }, []);
 
-  // Debounced search
+  // Debounced search — now only updates local state, does NOT re-fetch
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(searchInput);
-    }, 300);
+    }, 200);
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Fetch students on mount and when search/class filter changes
+  // Fetch students on mount and when class filter changes (search is client-side now)
   useEffect(() => {
     fetchStudents();
   }, [fetchStudents]);
@@ -651,7 +752,7 @@ export default function StudentListView() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ─── Header ─── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Student List</h1>
@@ -659,6 +760,7 @@ export default function StudentListView() {
             <Badge variant="secondary">{filteredStudents.length}</Badge>
           )}
         </div>
+        {/* ─── FIXED: Responsive action buttons ─── */}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
@@ -685,7 +787,8 @@ export default function StudentListView() {
           )}
           <Button onClick={() => navigate("student-add")} className="gap-2">
             <Plus className="size-4" />
-            Add Student
+            <span className="hidden xs:inline">Add Student</span>
+            <span className="xs:hidden">Add</span>
           </Button>
           <Button
             variant="outline"
@@ -695,7 +798,7 @@ export default function StudentListView() {
             className="gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <KeyRound className="size-4" />
-            {fixingLogins ? "Fixing..." : "Fix Logins"}
+            <span className="hidden sm:inline">{fixingLogins ? "Fixing..." : "Fix Logins"}</span>
           </Button>
 
           {/* Delete All Students — Custom Confirmation */}
@@ -707,7 +810,7 @@ export default function StudentListView() {
                 className="gap-2 bg-red-600 hover:bg-red-700"
               >
                 <Trash2 className="size-4" />
-                Delete All
+                <span className="hidden sm:inline">Delete All</span>
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md">
@@ -774,7 +877,7 @@ export default function StudentListView() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* ─── Filters ─── */}
       <div className="space-y-3">
         {/* Filter Row: Class + Gender + Search */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -799,31 +902,44 @@ export default function StudentListView() {
           </div>
 
           {/* Gender Toggle */}
-          <div className="flex items-center rounded-lg border bg-muted/50 p-0.5">
+          <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 shrink-0">
             {(["all", "Male", "Female"] as const).map((g) => (
               <button
                 key={g}
                 type="button"
                 onClick={() => setGenderFilter(g)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${genderFilter === g
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-                  }`}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  genderFilter === g
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
                 {g === "all" ? "All" : g}
               </button>
             ))}
           </div>
 
-          {/* Search */}
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          {/* ─── FIXED: Search box — improved placeholder, clear button, full width on mobile ─── */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search students..."
+              placeholder="Search name, reg no, class, dept..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="pl-9"
+              className="pl-9 pr-8 w-full"
             />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -957,8 +1073,9 @@ export default function StudentListView() {
                       <TableCell className="font-medium text-muted-foreground">
                         {index + 1}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {student.regNo}
+                      {/* ─── FIXED: RegNo with show/copy button ─── */}
+                      <TableCell>
+                        <RegNoCell regNo={student.regNo} />
                       </TableCell>
                       <TableCell className="font-medium">
                         <button
@@ -1035,7 +1152,7 @@ export default function StudentListView() {
             </CardContent>
           </Card>
 
-          {/* Mobile: Card view */}
+          {/* ─── FIXED: Mobile: Card view with RegNo button ─── */}
           <div className="space-y-3 md:hidden">
             {filteredStudents.map((student, index) => (
               <Card key={student.id}>
@@ -1057,9 +1174,10 @@ export default function StudentListView() {
                           {student.fullname}
                         </h3>
                       </button>
-                      <p className="text-xs text-muted-foreground">
-                        {student.regNo}
-                      </p>
+                      {/* ─── FIXED: RegNo with show/copy button on mobile ─── */}
+                      <div className="mt-1">
+                        <RegNoCell regNo={student.regNo} compact />
+                      </div>
                     </div>
                     <div className="flex shrink-0 gap-1">
                       <Button
@@ -1152,9 +1270,32 @@ export default function StudentListView() {
                   <h2 className="mt-4 text-xl font-bold">
                     {detailStudent.fullname}
                   </h2>
-                  <p className="mt-1 font-mono text-sm text-muted-foreground">
-                    {detailStudent.regNo}
-                  </p>
+                  {/* ─── FIXED: RegNo with copy button in detail sheet ─── */}
+                  <div className="mt-1 flex items-center justify-center gap-1.5">
+                    <span className="font-mono text-sm text-muted-foreground">
+                      {detailStudent.regNo}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(detailStudent.regNo);
+                        } catch {
+                          const ta = document.createElement("textarea");
+                          ta.value = detailStudent.regNo;
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        }
+                        toast.success("Reg No copied!");
+                      }}
+                      className="p-1 rounded hover:bg-muted transition-colors"
+                      title="Copy Reg No"
+                    >
+                      <Copy className="size-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
                   <div className="mt-2 flex items-center gap-2">
                     <Badge variant="outline">{detailStudent.class}</Badge>
                     {detailStudent.gender && (
@@ -1643,12 +1784,13 @@ export default function StudentListView() {
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  className={`relative flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors ${importDragOver
-                    ? "border-primary bg-primary/5"
-                    : importFile
-                      ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/30"
-                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                    }`}
+                  className={`relative flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors ${
+                    importDragOver
+                      ? "border-primary bg-primary/5"
+                      : importFile
+                        ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/30"
+                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  }`}
                 >
                   <input
                     ref={fileInputRef}

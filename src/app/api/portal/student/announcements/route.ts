@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       where: { id: userId, tenantId },
     });
 
-    if (!user || user.role !== "STUDENT") {
+    if (!user || (user.role || "").toUpperCase() !== "STUDENT" || !user.studentId) {
       return NextResponse.json(
         { success: false, message: "Access denied" },
         { status: 403 }
