@@ -36,6 +36,11 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  WifiOff,
+  ServerCrash,
+  ShieldAlert,
+  UserX,
+  KeyRound as KeyRoundIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/store/index";
@@ -57,21 +62,34 @@ import { cn } from "@/lib/utils";
 // Status Error Message
 // ---------------------------------------------------------------------------
 
-function StatusMessage({ code, message }: { code: string; message: string }) {
-  const config: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; title: string }> = {
-    TENANT_PENDING: { icon: Clock, color: "text-amber-600", title: "Account Pending Approval" },
-    TENANT_REJECTED: { icon: X, color: "text-red-600", title: "Registration Rejected" },
-    TENANT_SUSPENDED: { icon: Shield, color: "text-red-600", title: "Account Suspended" },
+function StatusMessage({ code, message, lockoutMinutes }: { code: string; message: string; lockoutMinutes?: number }) {
+  const config: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; title: string; bg: string; border: string }> = {
+    TENANT_PENDING: { icon: Clock, color: "text-amber-600", title: "Account Pending Approval", bg: "bg-amber-50", border: "border-amber-200" },
+    TENANT_REJECTED: { icon: X, color: "text-red-600", title: "Registration Rejected", bg: "bg-red-50", border: "border-red-200" },
+    TENANT_SUSPENDED: { icon: Shield, color: "text-red-600", title: "Account Suspended", bg: "bg-red-50", border: "border-red-200" },
+    RATE_LIMITED: { icon: ShieldAlert, color: "text-orange-600", title: "Too Many Login Attempts", bg: "bg-orange-50", border: "border-orange-200" },
+    SERVER_ERROR: { icon: ServerCrash, color: "text-red-600", title: "Server Error", bg: "bg-red-50", border: "border-red-200" },
+    SERVICE_UNAVAILABLE: { icon: WifiOff, color: "text-red-600", title: "Connection Problem", bg: "bg-red-50", border: "border-red-200" },
+    NETWORK_ERROR: { icon: WifiOff, color: "text-red-600", title: "Connection Problem", bg: "bg-red-50", border: "border-red-200" },
+    USER_NOT_FOUND: { icon: UserX, color: "text-red-600", title: "Account Not Found", bg: "bg-red-50", border: "border-red-200" },
+    INVALID_PASSWORD: { icon: KeyRoundIcon, color: "text-red-600", title: "Incorrect Password", bg: "bg-red-50", border: "border-red-200" },
+    NO_USER_ACCOUNT: { icon: UserX, color: "text-amber-600", title: "No Login Account", bg: "bg-amber-50", border: "border-amber-200" },
   };
-  const cfg = config[code] || config.TENANT_PENDING;
+  const cfg = config[code] || config.SERVER_ERROR;
   const Icon = cfg.icon;
   return (
-    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className={`rounded-lg border p-4 ${cfg.bg} ${cfg.border}`}>
       <div className="flex items-start gap-3">
         <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${cfg.color}`} />
         <div>
           <p className={`text-sm font-semibold ${cfg.color}`}>{cfg.title}</p>
           <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+          {code === "RATE_LIMITED" && lockoutMinutes && lockoutMinutes > 0 && (
+            <p className="mt-1.5 text-xs font-medium text-orange-600">Try again in {lockoutMinutes} minute{lockoutMinutes > 1 ? "s" : ""}.</p>
+          )}
+          {code === "NETWORK_ERROR" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">Check your internet connection and try again.</p>
+          )}
         </div>
       </div>
     </motion.div>
@@ -580,7 +598,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [statusError, setStatusError] = useState<{ code: string; message: string } | null>(null);
+  const [statusError, setStatusError] = useState<{ code: string; message: string; lockoutMinutes?: number } | null>(null);
 
   // Dynamic plans from DB (replaces hardcoded PLANS)
   const [plans, setPlans] = useState(FALLBACK_PLANS);
@@ -623,23 +641,76 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setIsLoading(true); setStatusError(null);
-    try {
-      const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
-      const data = await res.json();
-      if (!res.ok) { if (data.code && data.code.startsWith("TENANT_")) { setStatusError({ code: data.code, message: data.message }); return; } throw new Error(data.error || data.message || "Login failed"); }
-      if (data.tenant) setTenant(data.tenant);
-      login({ id: data.user.id, email: data.user.email, username: data.user.username, role: data.user.role, imageUrl: data.user.imageUrl, tenantId: data.user.tenantId || null });
-      toast.success("Welcome back!", { description: `Signed in as ${data.user.username}` });
-      setShowLoginModal(false);
 
-      // Role-based redirect
-      if (data.user.role === "STUDENT") {
-        navigate("student-dashboard");
-      } else {
-        navigate("dashboard");
+    // ---- Detect network errors (no internet, DNS failure, server unreachable) ----
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (networkErr) {
+      // fetch() throws a TypeError when the network is unreachable
+      setIsLoading(false);
+      setStatusError({
+        code: "NETWORK_ERROR",
+        message: "Unable to reach the server. This is not a login issue — your device may be offline or the server is temporarily unreachable.",
+      });
+      return;
+    }
+
+    // ---- Parse the API response ----
+    let data: Record<string, unknown>;
+    try {
+      data = await res.json();
+    } catch {
+      setIsLoading(false);
+      setStatusError({
+        code: "SERVER_ERROR",
+        message: "Received an invalid response from the server. Please try again shortly.",
+      });
+      return;
+    }
+
+    // ---- Handle non-success responses with specific error codes ----
+    if (!res.ok) {
+      const code = (data.code as string) || "";
+      const message = (data.message as string) || "Login failed. Please try again.";
+
+      // All known error codes → show via StatusMessage (not toast)
+      if (code) {
+        setIsLoading(false);
+        setStatusError({
+          code,
+          message,
+          lockoutMinutes: (data.lockoutMinutes as number) || undefined,
+        });
+        return;
       }
-    } catch (err) { toast.error("Login failed", { description: err instanceof Error ? err.message : "An unexpected error occurred" }); }
-    finally { setIsLoading(false); }
+
+      // Fallback for unrecognised errors — use HTTP status to give a clue
+      setIsLoading(false);
+      if (res.status >= 500) {
+        setStatusError({ code: "SERVER_ERROR", message: "The server encountered an error. Please try again in a few moments." });
+      } else {
+        setStatusError({ code: "SERVER_ERROR", message });
+      }
+      return;
+    }
+
+    // ---- Success ----
+    if (data.tenant) setTenant(data.tenant as Parameters<typeof setTenant>[0]);
+    login({ id: (data.user as Record<string, string>).id, email: (data.user as Record<string, string>).email, username: (data.user as Record<string, string>).username, role: (data.user as Record<string, string>).role, imageUrl: (data.user as Record<string, string>).imageUrl, tenantId: (data.user as Record<string, string>).tenantId || null });
+    toast.success("Welcome back!", { description: `Signed in as ${(data.user as Record<string, string>).username}` });
+    setShowLoginModal(false);
+
+    // Role-based redirect
+    if ((data.user as Record<string, string>).role === "STUDENT") {
+      navigate("student-dashboard");
+    } else {
+      navigate("dashboard");
+    }
   };
 
   const handleDevLogin = async (e: React.FormEvent) => {
@@ -796,7 +867,7 @@ export default function LoginPage() {
             <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-5 w-5" /></div><div><DialogTitle className="text-xl">Welcome Back</DialogTitle><DialogDescription>Sign in to your school dashboard</DialogDescription></div></div>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="mt-2 space-y-4">
-            {statusError && <StatusMessage code={statusError.code} message={statusError.message} />}
+            {statusError && <StatusMessage code={statusError.code} message={statusError.message} lockoutMinutes={statusError.lockoutMinutes} />}
             <div className="space-y-2"><Label htmlFor="email">Email or Reg Number</Label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="email" type="text" placeholder="admin@school.com" value={email} onChange={(e) => { setEmail(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
             <div className="space-y-2"><Label htmlFor="password">Password</Label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => { setPassword(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
             <Button type="submit" className="w-full text-white" style={{ backgroundColor: "#C0522B" }} disabled={isLoading}>{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in...</> : "Sign In"}</Button>

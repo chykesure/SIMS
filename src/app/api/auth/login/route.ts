@@ -10,24 +10,30 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { email, password } = body;
 
+    // Sanitize inputs
     const sanitizedEmail = sanitizeInput(email, "email");
     const sanitizedPassword = sanitizeInput(password, "password");
 
     if (!sanitizedEmail || !sanitizedPassword) {
       return NextResponse.json(
-        { success: false, message: "Email and password are required" },
+        {
+          success: false,
+          message: "Email and password are required",
+        },
         { status: 400 }
       );
     }
 
+    // ---- Security: Create login security check ----
     const loginSecurity = createLoginSecurityCheck(sanitizedEmail, request);
 
+    // ---- Security: Pre-check rate limit ----
     const preCheck = loginSecurity.preCheck();
     if (!preCheck.allowed) {
       return NextResponse.json(
         {
           success: false,
-          message: preCheck.reason || "Too many login attempts.",
+          message: preCheck.reason || "Too many login attempts. Please try again later.",
           code: "RATE_LIMITED",
           lockoutMinutes: preCheck.lockoutMinutes,
         },
@@ -35,37 +41,26 @@ export async function POST(request: Request) {
       );
     }
 
-    // Step 1: Find user by email (handles returning students, admin, teacher)
+    // Find user by email (also support regNo for student login)
     let user = await db.user.findFirst({
       where: { email: sanitizedEmail },
     });
 
-    // Step 2: If no user found, try student regNo lookup
+    // If not found by email, try looking up a student by regNo and match their user
     if (!user) {
       const tenantId = request.headers.get("x-tenant-id");
-      const trimmedReg = sanitizedEmail.trim();
 
-      // Try 3 variations: exact, lowercase, uppercase
-      let student = await db.student.findFirst({
-        where: { regNo: trimmedReg },
-      });
-
-      if (!student) {
-        student = await db.student.findFirst({
-          where: { regNo: trimmedReg.toLowerCase() },
+      // Try to find student by regNo
+      const student = tenantId
+        ? await db.student.findFirst({
+          where: { regNo: sanitizedEmail, tenantId },
+        })
+        : await db.student.findFirst({
+          where: { regNo: sanitizedEmail },
         });
-      }
-
-      if (!student) {
-        student = await db.student.findFirst({
-          where: { regNo: trimmedReg.toUpperCase() },
-        });
-      }
-
-      console.log("[LOGIN DEBUG] Looking for student with regNo:", trimmedReg, "| Found:", student?.id || "NOT FOUND");
 
       if (student) {
-        // Look for existing User linked to this student
+        // Look for an existing User linked to this student
         const existingUser = tenantId
           ? await db.user.findFirst({
             where: { studentId: student.id, tenantId },
@@ -77,13 +72,14 @@ export async function POST(request: Request) {
         if (existingUser) {
           user = existingUser;
         } else {
-          // AUTO-CREATE User on first login
+          // AUTO-CREATE: If student exists but no User account, create one
           const defaultPassword = student.regNo.toLowerCase();
 
-          if (sanitizedPassword.toLowerCase() === defaultPassword.toLowerCase()) {
+          // Only auto-create if the password matches the default
+          if (sanitizedPassword === defaultPassword) {
             user = await db.user.create({
               data: {
-                email: student.regNo,
+                email: sanitizedEmail,
                 username: student.fullname || `Student-${student.regNo}`,
                 password: defaultPassword,
                 role: "STUDENT",
@@ -92,108 +88,136 @@ export async function POST(request: Request) {
                 imageUrl: student.imageUrl || undefined,
               },
             });
-            console.log("[LOGIN DEBUG] Auto-created user for student:", student.regNo);
           } else {
-            console.log("[LOGIN DEBUG] Wrong password for student:", student.regNo, "| typed:", sanitizedPassword, "| expected:", defaultPassword);
-            await loginSecurity.onFailed("User not found (no account)");
-            return NextResponse.json(
-              {
-                success: false,
-                message: "No login account found for this student. Please contact your school admin.",
-                code: "NO_USER_ACCOUNT",
-              },
-              { status: 401 }
-            );
+            // Student exists, User doesn't exist yet — check if password matches default (case-insensitive)
+            if (sanitizedPassword.toLowerCase() === defaultPassword) {
+              user = await db.user.create({
+                data: {
+                  email: sanitizedEmail,
+                  username: student.fullname || `Student-${student.regNo}`,
+                  password: sanitizedPassword,
+                  role: "STUDENT",
+                  studentId: student.id,
+                  tenantId: student.tenantId,
+                  imageUrl: student.imageUrl || undefined,
+                },
+              });
+            } else {
+              await loginSecurity.onFailed("User not found (no account)");
+
+              return NextResponse.json(
+                {
+                  success: false,
+                  message: "No login account found for this student. Please contact your school admin to create your login credentials.",
+                  code: "NO_USER_ACCOUNT",
+                },
+                { status: 401 }
+              );
+            }
           }
         }
-      } else {
-        console.log("[LOGIN DEBUG] No student found for:", trimmedReg);
       }
     }
 
     if (!user) {
+      // ---- Security: Log failed attempt ----
       await loginSecurity.onFailed("User not found");
+
       return NextResponse.json(
-        { success: false, message: "Invalid email or password" },
+        {
+          success: false,
+          message: "No account found with this email or registration number. Please double-check and try again.",
+          code: "USER_NOT_FOUND",
+        },
         { status: 401 }
       );
     }
 
-    // Password check
-    if (user.password.toLowerCase() !== sanitizedPassword.toLowerCase()) {
-      // For student users: fallback to default password (regNo) and auto-fix
-      if (user.studentId) {
-        const student = await db.student.findUnique({
-          where: { id: user.studentId },
-        });
-        if (student) {
-          const defaultPw = student.regNo.toLowerCase();
-          if (sanitizedPassword.toLowerCase() === defaultPw) {
-            // Update stored password to match the default
-            await db.user.update({
-              where: { id: user.id },
-              data: { password: defaultPw, role: "STUDENT" },
-            });
-            // Continue to login (don't return error)
-          } else {
-            console.log("[LOGIN DEBUG] Student password mismatch. Stored:", user.password, "| Typed:", sanitizedPassword, "| Default would be:", defaultPw);
-            await loginSecurity.onFailed("Invalid password");
-            return NextResponse.json(
-              { success: false, message: "Invalid email or password" },
-              { status: 401 }
-            );
-          }
-        } else {
-          await loginSecurity.onFailed("Invalid password");
-          return NextResponse.json(
-            { success: false, message: "Invalid email or password" },
-            { status: 401 }
-          );
-        }
-      } else {
-        console.log("[LOGIN DEBUG] Password mismatch for user:", user.email);
+    // Plain text password comparison (for demo with SQLite)
+    if (user.password !== sanitizedPassword) {
+      // Fallback: case-insensitive match for student accounts created with
+      // the default lowercase regNo password (auto-created accounts)
+      const isDefaultPasswordAccount =
+        user.password === user.password.toLowerCase() &&
+        sanitizedPassword.toLowerCase() === user.password;
+
+      if (!isDefaultPasswordAccount) {
+        // ---- Security: Log failed attempt ----
         await loginSecurity.onFailed("Invalid password");
+
         return NextResponse.json(
-          { success: false, message: "Invalid email or password" },
+          {
+            success: false,
+            message: "The password you entered is incorrect. Please check your password and try again.",
+            code: "INVALID_PASSWORD",
+          },
           { status: 401 }
         );
       }
+
+      // Update the stored password to the user's preferred casing for future logins
+      await db.user.update({
+        where: { id: user.id },
+        data: { password: sanitizedPassword },
+      });
     }
 
+    // Fetch tenant info
     const tenant = await db.tenant.findUnique({
       where: { id: user.tenantId },
     });
 
     if (!tenant) {
       return NextResponse.json(
-        { success: false, message: "Tenant not found" },
+        {
+          success: false,
+          message: "Tenant not found",
+          code: "SERVER_ERROR",
+        },
         { status: 500 }
       );
     }
 
+    // CHECK TENANT STATUS — Block login if not approved
     if (tenant.status === "pending") {
       return NextResponse.json(
-        { success: false, message: "Your school account is still pending approval.", code: "TENANT_PENDING" },
+        {
+          success: false,
+          message: "Your school account is still pending approval. Please wait for the administrator to review and approve your registration.",
+          code: "TENANT_PENDING",
+        },
         { status: 403 }
       );
     }
 
     if (tenant.status === "rejected") {
       return NextResponse.json(
-        { success: false, message: tenant.rejectionReason || "Registration rejected.", code: "TENANT_REJECTED" },
+        {
+          success: false,
+          message: tenant.rejectionReason
+            ? `Your school registration was rejected: ${tenant.rejectionReason}`
+            : "Your school registration was rejected. Please contact support for more information.",
+          code: "TENANT_REJECTED",
+        },
         { status: 403 }
       );
     }
 
     if (tenant.status === "suspended") {
       return NextResponse.json(
-        { success: false, message: "School account suspended.", code: "TENANT_SUSPENDED" },
+        {
+          success: false,
+          message: "Your school account has been suspended. Please contact the administrator for assistance.",
+          code: "TENANT_SUSPENDED",
+        },
         { status: 403 }
       );
     }
 
+    // ---- Security: Log successful login ----
     await loginSecurity.onSuccess();
 
+    // Create login history entry
     await db.loginHistory.create({
       data: {
         tenantId: user.tenantId,
@@ -205,6 +229,7 @@ export async function POST(request: Request) {
       },
     });
 
+    // Return user data (excluding password) and tenant data
     return NextResponse.json(
       {
         success: true,
@@ -243,11 +268,33 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error occurred";
-    console.error("[LOGIN ERROR]", error);
+    console.error("Login API error:", error);
+
+    // Detect connectivity / database reachability errors caused by network issues
+    const errMsg = error instanceof Error ? error.message.toLowerCase() : "";
+    const isNetworkRelated =
+      errMsg.includes("econnrefused") ||
+      errMsg.includes("enotfound") ||
+      errMsg.includes("etimedout") ||
+      errMsg.includes("econnreset") ||
+      errMsg.includes("socket hang up") ||
+      errMsg.includes("can't reach database") ||
+      errMsg.includes("unable to connect") ||
+      errMsg.includes("fetch failed") ||
+      errMsg.includes("network") ||
+      errMsg.includes("prisma") ||
+      errMsg.includes("sqlite") ||
+      errMsg.includes("database");
+
     return NextResponse.json(
-      { success: false, message: `Login failed: ${message}` },
-      { status: 500 }
+      {
+        success: false,
+        message: isNetworkRelated
+          ? "The server could not process your request due to a network issue. Please check your internet connection and try again."
+          : "Something went wrong on our end. Please try again in a few moments. If the problem persists, contact support.",
+        code: isNetworkRelated ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR",
+      },
+      { status: 503 }
     );
   }
 }

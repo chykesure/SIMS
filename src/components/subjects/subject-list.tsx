@@ -35,11 +35,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+
+const DEPARTMENT_OPTIONS = ["None", "Science", "Art", "Commerce"];
 
 interface Subject {
   id: string;
   name: string;
+  department: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +65,7 @@ export default function SubjectListView() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
   const [formName, setFormName] = useState("");
+  const [formDepartment, setFormDepartment] = useState("None");
   const [submitting, setSubmitting] = useState(false);
 
   // Delete single state
@@ -97,12 +108,14 @@ export default function SubjectListView() {
   const openAdd = () => {
     setEditingSubject(null);
     setFormName("");
+    setFormDepartment("None");
     setDialogOpen(true);
   };
 
   const openEdit = (subject: Subject) => {
     setEditingSubject(subject);
     setFormName(subject.name);
+    setFormDepartment(subject.department || "None");
     setDialogOpen(true);
   };
 
@@ -115,11 +128,13 @@ export default function SubjectListView() {
 
     try {
       setSubmitting(true);
-      const url = editingSubject ? "/api/subjects" : "/api/subjects";
+      const url = "/api/subjects";
       const method = editingSubject ? "PUT" : "POST";
+      // "None" maps to empty string in the database
+      const deptValue = formDepartment === "None" ? "" : formDepartment;
       const body = editingSubject
-        ? { id: editingSubject.id, name: trimmed }
-        : { name: trimmed };
+        ? { id: editingSubject.id, name: trimmed, department: deptValue }
+        : { name: trimmed, department: deptValue };
 
       const res = await fetch(url, {
         method,
@@ -291,6 +306,7 @@ export default function SubjectListView() {
             <TableRow>
               <TableHead className="w-16">#</TableHead>
               <TableHead>Subject Name</TableHead>
+              <TableHead className="w-36">Department</TableHead>
               <TableHead className="w-28 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -304,6 +320,9 @@ export default function SubjectListView() {
                   <TableCell>
                     <Skeleton className="h-4 w-48" />
                   </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
                   <TableCell className="text-right">
                     <Skeleton className="ml-auto h-8 w-20" />
                   </TableCell>
@@ -312,7 +331,7 @@ export default function SubjectListView() {
             ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={3}
+                  colSpan={4}
                   className="h-32 text-center text-muted-foreground"
                 >
                   {debouncedSearch
@@ -325,6 +344,15 @@ export default function SubjectListView() {
                 <TableRow key={subject.id}>
                   <TableCell className="font-medium">{idx + 1}</TableCell>
                   <TableCell>{subject.name}</TableCell>
+                  <TableCell>
+                    {subject.department ? (
+                      <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                        {subject.department}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">All</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
                       <Button
@@ -361,8 +389,8 @@ export default function SubjectListView() {
             </DialogTitle>
             <DialogDescription>
               {editingSubject
-                ? "Update the subject name below."
-                : "Enter a name for the new subject."}
+                ? "Update the subject details below."
+                : "Enter details for the new subject."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -377,6 +405,24 @@ export default function SubjectListView() {
                   if (e.key === "Enter") handleSubmit();
                 }}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Department</Label>
+              <Select value={formDepartment} onValueChange={setFormDepartment}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map((dept) => (
+                    <SelectItem key={dept} value={dept}>
+                      {dept === "None" ? "All Departments" : dept}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                &quot;All Departments&quot; means the subject is offered by all students (e.g. English, Mathematics).
+              </p>
             </div>
           </div>
           <DialogFooter>

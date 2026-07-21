@@ -39,6 +39,7 @@ interface ClassData {
 interface SubjectData {
   id: string
   name: string
+  department: string
 }
 
 interface StudentInfo {
@@ -72,6 +73,13 @@ interface AssessmentConfig {
   examMax: number
 }
 
+const DEPARTMENT_OPTIONS = ['All', 'Science', 'Art', 'Commerce']
+
+function isSeniorClass(classTitle: string): boolean {
+  const t = classTitle.toLowerCase().trim()
+  return t.startsWith('sss') || t.startsWith('ss ')
+}
+
 const DEFAULT_ASSESSMENT: AssessmentConfig = {
   caCount: 2,
   ca1Label: '1st CA',
@@ -88,7 +96,7 @@ export function TeacherScores() {
   const { user, tenant } = useAppStore()
   const [sessions, setSessions] = useState<SessionData[]>([])
   const [classes, setClasses] = useState<ClassData[]>([])
-  const [subjects, setSubjects] = useState<SubjectData[]>([])
+  const [allSubjects, setAllSubjects] = useState<SubjectData[]>([])
   const [students, setStudents] = useState<StudentInfo[]>([])
   const [scores, setScores] = useState<ScoreRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -100,11 +108,30 @@ export function TeacherScores() {
   const [selectedSession, setSelectedSession] = useState('')
   const [selectedTerm, setSelectedTerm] = useState('')
   const [selectedClass, setSelectedClass] = useState('')
+  const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedSubject, setSelectedSubject] = useState('')
   const [searchStudent, setSearchStudent] = useState('')
 
   const primaryColor = tenant?.primaryColor || '#821329'
 
+  // Filter subjects: if a department is selected, show only subjects
+  // that belong to that department OR have no department (common subjects)
+  const selectedClassTitle = useMemo(() => {
+    return classes.find((c) => c.id === selectedClass)?.title || ''
+  }, [classes, selectedClass])
+
+  const isSenior = isSeniorClass(selectedClassTitle)
+
+  const subjects = useMemo(() => {
+    // No department filter for junior classes
+    if (!isSenior) return allSubjects
+    if (!selectedDepartment || selectedDepartment === 'All') return allSubjects
+    return allSubjects.filter(
+      (s) => !s.department || s.department === selectedDepartment
+    )
+  }, [allSubjects, selectedDepartment, isSenior])
+
+  // Build dynamic CA columns based on assessment settings
   const caColumns = useMemo(() => {
     const cols: { field: 'firstCa' | 'secondCa' | 'thirdCa'; label: string; max: number }[] = []
     const fields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
@@ -165,7 +192,7 @@ export function TeacherScores() {
       const subjectsData = Array.isArray(subjectsJson) ? subjectsJson : (subjectsJson.success ? subjectsJson.data : [])
       setSessions(sessionsData)
       setClasses(classesData)
-      setSubjects(subjectsData)
+      setAllSubjects(subjectsData)
     } catch {
       toast.error('Failed to load dropdown data')
     } finally {
@@ -194,6 +221,18 @@ export function TeacherScores() {
     setSelectedTerm('First Term')
   }, [selectedSession])
 
+  // When department or class changes, reset subject selection
+  useEffect(() => {
+    setSelectedSubject('')
+  }, [selectedDepartment])
+
+  useEffect(() => {
+    // Reset department when switching between junior/senior class
+    if (!isSenior) {
+      setSelectedDepartment('')
+    }
+  }, [isSenior])
+
   const makeEmptyScore = (s: StudentInfo): ScoreRow => ({
     fullname: s.fullname,
     studentId: s.id,
@@ -204,8 +243,7 @@ export function TeacherScores() {
     total: 0,
   })
 
-  // Single consolidated effect: prevents race condition where two separate
-  // useEffects would flash 0-values on first parameter selection.
+  // Single consolidated effect for fetching students + scores
   const fetchSeqRef = useRef(0)
   useEffect(() => {
     if (!selectedClass) {
@@ -216,72 +254,74 @@ export function TeacherScores() {
     const classTitle = classes.find((c) => c.id === selectedClass)?.title || ''
     const seq = ++fetchSeqRef.current
 
-    ;(async () => {
-      try {
-        setLoadingStudents(true)
-        const res = await fetch(`/api/students?class=${encodeURIComponent(classTitle)}`)
-        const json = await res.json()
-        const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
+      ; (async () => {
+        try {
+          setLoadingStudents(true)
+          const studentParams = new URLSearchParams({ class: classTitle })
+          if (isSeniorClass(classTitle) && selectedDepartment && selectedDepartment !== 'All') {
+            studentParams.set('department', selectedDepartment)
+          }
+          const res = await fetch(`/api/students?${studentParams}`)
+          const json = await res.json()
+          const studentData = Array.isArray(json) ? json : (json.success ? json.data : [])
 
-        if (seq !== fetchSeqRef.current) return // stale request — bail out
-        setStudents(studentData)
-
-        if (selectedSubject && sessionDisplay && selectedTerm) {
-          const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
-          const params = new URLSearchParams({
-            session: sessionDisplay,
-            term: selectedTerm,
-            class: classTitle,
-            subject: subjectName,
-          })
-          const scoreRes = await fetch(`/api/portal/teacher/scores?${params}`)
-          const scoreJson = await scoreRes.json()
-
-          if (seq !== fetchSeqRef.current) return // stale — bail out
-          const existingScores = scoreJson.success ? scoreJson.data : []
-          const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
-
-          setScores(
-            studentData.map((s) => {
-              const existing = existingScores.find(
-                (sc: Record<string, unknown>) => sc.fullname === s.fullname
-              )
-              const row: ScoreRow = {
-                fullname: s.fullname,
-                studentId: s.id,
-                firstCa: 0,
-                secondCa: 0,
-                thirdCa: 0,
-                exam: existing ? Number(existing.exam) : 0,
-                total: 0,
-              }
-              for (let i = 0; i < assessment.caCount; i++) {
-                if (existing) {
-                  row[caFields[i]] = Number(existing[caFields[i]])
-                }
-              }
-              row.total = caFields.slice(0, assessment.caCount).reduce((sum, f) => sum + row[f], 0) + row.exam
-              return row
-            })
-          )
-        } else {
           if (seq !== fetchSeqRef.current) return
-          setScores(studentData.map(makeEmptyScore))
+          setStudents(studentData)
+
+          if (selectedSubject && sessionDisplay && selectedTerm) {
+            const subjectName = subjects.find((s) => s.id === selectedSubject)?.name || ''
+            const params = new URLSearchParams({
+              session: sessionDisplay,
+              term: selectedTerm,
+              class: classTitle,
+              subject: subjectName,
+            })
+            const scoreRes = await fetch(`/api/portal/teacher/scores?${params}`)
+            const scoreJson = await scoreRes.json()
+
+            if (seq !== fetchSeqRef.current) return
+            const existingScores = scoreJson.success ? scoreJson.data : []
+            const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
+
+            setScores(
+              studentData.map((s) => {
+                const existing = existingScores.find(
+                  (sc: Record<string, unknown>) => sc.fullname === s.fullname
+                )
+                const row: ScoreRow = {
+                  fullname: s.fullname,
+                  studentId: s.id,
+                  firstCa: 0,
+                  secondCa: 0,
+                  thirdCa: 0,
+                  exam: existing ? Number(existing.exam) : 0,
+                  total: 0,
+                }
+                for (let i = 0; i < assessment.caCount; i++) {
+                  if (existing) {
+                    row[caFields[i]] = Number(existing[caFields[i]])
+                  }
+                }
+                row.total = caFields.slice(0, assessment.caCount).reduce((sum, f) => sum + row[f], 0) + row.exam
+                return row
+              })
+            )
+          } else {
+            if (seq !== fetchSeqRef.current) return
+            setScores(studentData.map(makeEmptyScore))
+          }
+        } catch {
+          if (seq !== fetchSeqRef.current) return
+          toast.error('Failed to load students')
+          setStudents([])
+          setScores([])
+        } finally {
+          if (seq !== fetchSeqRef.current) return
+          setLoadingStudents(false)
         }
-      } catch {
-        if (seq !== fetchSeqRef.current) return
-        toast.error('Failed to load students')
-        setStudents([])
-        setScores([])
-      } finally {
-        if (seq !== fetchSeqRef.current) return
-        setLoadingStudents(false)
-      }
-    })()
+      })()
   }, [selectedClass, selectedSubject, selectedTerm, selectedSession, assessment, sessionDisplay, classes, subjects])
 
-  // Only sum the CA fields that are currently visible based on caCount.
-  // This prevents ghost values in hidden CA fields from inflating the total.
   const computeTotal = (row: ScoreRow, changedField?: string, newVal?: number) => {
     const f = changedField
     const v = newVal ?? 0
@@ -326,7 +366,6 @@ export function TeacherScores() {
       return
     }
 
-    // Zero out hidden CA fields and recompute total before saving.
     const caFields: ('firstCa' | 'secondCa' | 'thirdCa')[] = ['firstCa', 'secondCa', 'thirdCa']
     const cleanScores = scores.map((s) => {
       const row = { ...s }
@@ -380,8 +419,8 @@ export function TeacherScores() {
     return (
       <div className="space-y-6 p-4 md:p-6">
         <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-10 rounded-lg" />
           ))}
         </div>
@@ -420,7 +459,10 @@ export function TeacherScores() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className={cn(
+            "grid grid-cols-1 gap-4 sm:grid-cols-2",
+            isSenior ? "lg:grid-cols-5" : "lg:grid-cols-4"
+          )}>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Session</Label>
               <Select value={selectedSession} onValueChange={setSelectedSession}>
@@ -468,6 +510,24 @@ export function TeacherScores() {
               </Select>
             </div>
 
+            {isSenior && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Department</Label>
+                <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All subjects" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEPARTMENT_OPTIONS.map((dept) => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Subject</Label>
               <Select value={selectedSubject} onValueChange={setSelectedSubject}>
@@ -511,6 +571,11 @@ export function TeacherScores() {
                 <CardTitle className="text-base">
                   {classes.find((c) => c.id === selectedClass)?.title} &mdash;{' '}
                   {subjects.find((s) => s.id === selectedSubject)?.name}
+                  {selectedDepartment && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                      {selectedDepartment}
+                    </span>
+                  )}
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
                     ({filteredScores.length} students)
                   </span>
@@ -543,6 +608,7 @@ export function TeacherScores() {
                           </span>
                         </TableHead>
                       ))}
+
                       <TableHead className="w-24 text-center">
                         {assessment.examLabel}
                         <span className="block text-[10px] font-normal text-muted-foreground">
@@ -631,7 +697,8 @@ export function TeacherScores() {
             Choose from the dropdowns above to get started
           </p>
         </div>
-      )}
-    </div>
+      )
+      }
+    </div >
   )
 }

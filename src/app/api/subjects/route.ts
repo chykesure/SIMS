@@ -1,5 +1,4 @@
 // FILE: src/app/api/subjects/route.ts
-// Replace the entire file with this code
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -11,9 +10,14 @@ function getTenantId(request: Request): string {
 export async function GET(request: Request) {
   try {
     const tenantId = getTenantId(request);
+    const { searchParams } = new URL(request.url);
+    const department = searchParams.get("department");
 
     const subjects = await db.subject.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(department ? { department } : {}),
+      },
       orderBy: { name: "asc" },
     });
     return NextResponse.json(subjects);
@@ -30,7 +34,7 @@ export async function POST(request: Request) {
   try {
     const tenantId = getTenantId(request);
     const body = await request.json();
-    const { name } = body;
+    const { name, department } = body;
 
     if (!name) {
       return NextResponse.json(
@@ -47,7 +51,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const subject = await db.subject.create({ data: { tenantId, name } });
+    const subject = await db.subject.create({
+      data: { tenantId, name, department: department || "" },
+    });
     return NextResponse.json(subject, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
@@ -62,7 +68,7 @@ export async function PUT(request: Request) {
   try {
     const tenantId = getTenantId(request);
     const body = await request.json();
-    const { id, name } = body;
+    const { id, name, department } = body;
 
     if (!id || !name) {
       return NextResponse.json(
@@ -81,7 +87,7 @@ export async function PUT(request: Request) {
 
     const subject = await db.subject.update({
       where: { id },
-      data: { name },
+      data: { name, department: department !== undefined ? department : existing.department },
     });
 
     return NextResponse.json(subject);

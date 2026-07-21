@@ -57,11 +57,15 @@ export async function GET(request: Request) {
     const tenantId = getTenantId(request);
     const { searchParams } = new URL(request.url);
     const classFilter = searchParams.get("class");
+    const departmentFilter = searchParams.get("department");
     const q = searchParams.get("q")?.trim() || "";
 
     const where: Record<string, unknown> = { tenantId };
     if (classFilter) {
       where.class = { equals: classFilter };
+    }
+    if (departmentFilter) {
+      where.department = { equals: departmentFilter };
     }
     if (q) {
       where.OR = [
