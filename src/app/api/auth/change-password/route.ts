@@ -39,7 +39,15 @@ export async function POST(request: Request) {
     }
 
     // Verify current password (plain text comparison for demo)
-    if (user.password !== currentPassword) {
+    // Case-insensitive for student regNo passwords
+    if (user.role === "STUDENT") {
+      if (user.password.toLowerCase() !== currentPassword.toLowerCase()) {
+        return NextResponse.json(
+          { success: false, message: "Current password is incorrect" },
+          { status: 401 }
+        );
+      }
+    } else if (user.password !== currentPassword) {
       return NextResponse.json(
         { success: false, message: "Current password is incorrect" },
         { status: 401 }

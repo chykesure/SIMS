@@ -46,12 +46,23 @@ export async function POST(request: Request) {
       where: { email: sanitizedEmail },
     });
 
-    // If not found by email, try looking up a student by regNo (case-insensitive)
+    // Find user by email (also support regNo for student login)
+    // Use case-insensitive lookup since regNos may have mixed casing
+    const tenantId = request.headers.get("x-tenant-id");
+
+    // Fetch all users for this tenant and match email case-insensitively
+    // (SQLite doesn't support Prisma mode: "insensitive")
+    const allUsers = tenantId
+      ? await db.user.findMany({ where: { tenantId } })
+      : await db.user.findMany();
+
+    user = allUsers.find(
+      (u) => u.email.toLowerCase() === sanitizedEmail.toLowerCase()
+    ) || null;
+
     // If not found by email, try looking up a student by regNo and match their user
     if (!user) {
-      const tenantId = request.headers.get("x-tenant-id");
-
-      // SQLite doesn't support mode: "insensitive", so fetch all and filter in JS
+      // SQLite doesn't support mode: "insensitive", so fetch all students and filter in JS
       const allStudents = tenantId
         ? await db.student.findMany({ where: { tenantId } })
         : await db.student.findMany();
@@ -62,13 +73,9 @@ export async function POST(request: Request) {
 
       if (student) {
         // Look for an existing User linked to this student
-        const existingUser = tenantId
-          ? await db.user.findFirst({
-            where: { studentId: student.id, tenantId },
-          })
-          : await db.user.findFirst({
-            where: { studentId: student.id },
-          });
+        const existingUser = allUsers.find(
+          (u) => u.studentId === student.id
+        );
 
         if (existingUser) {
           user = existingUser;

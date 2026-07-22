@@ -29,30 +29,23 @@ export async function POST(request: Request) {
 
     const trimmedEmail = email.trim().toLowerCase();
 
-    // Search by recoveryEmail first, then fallback to login email
-    let user = await db.user.findFirst({
-      where: { recoveryEmail: trimmedEmail },
+    // SQLite doesn't support case-insensitive search, so fetch all and filter in JS
+    const allUsers = await db.user.findMany({
       include: { tenant: { select: { name: true } } },
     });
 
+    // Search by recoveryEmail first (case-insensitive), then fallback to login email
+    let user = allUsers.find(
+      (u) => u.recoveryEmail && u.recoveryEmail.toLowerCase() === trimmedEmail
+    );
+
     if (!user) {
-      user = await db.user.findFirst({
-        where: { email: trimmedEmail },
-        include: { tenant: { select: { name: true } } },
-      });
+      user = allUsers.find(
+        (u) => u.email.toLowerCase() === trimmedEmail
+      );
     }
 
     if (!user) {
-      return NextResponse.json({
-        success: true,
-        found: false,
-        message: "No account found with that email. Please check and try again.",
-      });
-    }
-
-    // Only allow Admin, Staff, SuperAdmin, and Teacher to self-reset
-    const allowedRoles = ["admin", "staff", "superadmin", "teacher"];
-    if (!allowedRoles.includes(user.role.toLowerCase())) {
       return NextResponse.json({
         success: true,
         found: false,
