@@ -35,9 +35,38 @@ export async function GET(request: Request) {
     } catch { /* use default */ }
 
     // Fetch all exam scores for this session/class/term
-    const scores = await db.examScore.findMany({
+    const allScores = await db.examScore.findMany({
       where: { tenantId, session, class: cls, term },
       orderBy: { fullname: "asc" },
+    });
+
+    // Fetch subjects with departments for filtering
+    const subjectsWithDept = await db.subject.findMany({
+      where: { tenantId, department: { not: "" } },
+      select: { name: true, department: true },
+    });
+    const subjectDeptMap = new Map<string, string>();
+    for (const s of subjectsWithDept) {
+      subjectDeptMap.set(s.name.toLowerCase(), s.department.toLowerCase());
+    }
+
+    // Fetch students with departments
+    const studentsInClass = await db.student.findMany({
+      where: { tenantId, class: cls },
+      select: { fullname: true, department: true },
+    });
+    const studentDeptMap = new Map<string, string>();
+    for (const s of studentsInClass) {
+      studentDeptMap.set(s.fullname.toLowerCase(), (s.department || "").toLowerCase());
+    }
+
+    // Filter out scores where subject dept doesn't match student dept
+    const scores = allScores.filter((score) => {
+      const subjDept = subjectDeptMap.get(score.subject.toLowerCase());
+      if (!subjDept) return true; // common subject — keep
+      const stuDept = studentDeptMap.get(score.fullname.toLowerCase());
+      if (!stuDept) return true; // no student dept (junior) — keep
+      return subjDept === stuDept; // only keep if departments match
     });
 
     if (scores.length === 0) {

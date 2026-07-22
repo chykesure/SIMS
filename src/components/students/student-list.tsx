@@ -153,9 +153,8 @@ function RegNoCell({ regNo, compact = false }: { regNo: string; compact?: boolea
   return (
     <div className="flex items-center gap-1">
       <span
-        className={`font-mono text-xs ${compact ? "text-[11px]" : ""} ${
-          visible ? "" : "blur-[4px] select-none hover:blur-[2px] transition-all cursor-pointer"
-        }`}
+        className={`font-mono text-xs ${compact ? "text-[11px]" : ""} ${visible ? "" : "blur-[4px] select-none hover:blur-[2px] transition-all cursor-pointer"
+          }`}
         onClick={() => setVisible(true)}
         title={visible ? regNo : "Click to reveal reg no"}
       >
@@ -176,9 +175,8 @@ function RegNoCell({ regNo, compact = false }: { regNo: string; compact?: boolea
       <button
         type="button"
         onClick={handleCopy}
-        className={`p-1 rounded transition-colors shrink-0 ${
-          copied ? "text-emerald-600" : "hover:bg-muted"
-        }`}
+        className={`p-1 rounded transition-colors shrink-0 ${copied ? "text-emerald-600" : "hover:bg-muted"
+          }`}
         title={copied ? "Copied!" : "Copy reg no"}
       >
         {copied ? (
@@ -224,6 +222,7 @@ export default function StudentListView() {
   // Filter state
   const [classFilter, setClassFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState<"all" | "Male" | "Female">("all");
+  const [deptFilter, setDeptFilter] = useState("all");
 
   // Fix logins state
   const [fixingLogins, setFixingLogins] = useState(false);
@@ -305,8 +304,13 @@ export default function StudentListView() {
       result = result.filter((s) => s.gender === genderFilter);
     }
 
+    // Department filter
+    if (deptFilter !== "all") {
+      result = result.filter((s) => (s.department || "").toLowerCase() === deptFilter.toLowerCase());
+    }
+
     return result;
-  }, [students, search, genderFilter]);
+  }, [students, search, genderFilter, deptFilter]);
 
   // Stats computed from filtered students
   const stats = useMemo(() => {
@@ -318,7 +322,7 @@ export default function StudentListView() {
   }, [filteredStudents]);
 
   // Check if any filters are active
-  const hasActiveFilters = search || classFilter !== "all" || genderFilter !== "all";
+  const hasActiveFilters = search || classFilter !== "all" || genderFilter !== "all" || deptFilter !== "all";
 
   // ─── FIXED: Fetch students WITHOUT search param (search is now client-side) ───
   const fetchStudents = useCallback(async () => {
@@ -379,6 +383,7 @@ export default function StudentListView() {
     setSearch("");
     setClassFilter("all");
     setGenderFilter("all");
+    setDeptFilter("all");
   }
 
   const handleFixLogins = async () => {
@@ -908,16 +913,31 @@ export default function StudentListView() {
                 key={g}
                 type="button"
                 onClick={() => setGenderFilter(g)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  genderFilter === g
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${genderFilter === g
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
               >
                 {g === "all" ? "All" : g}
               </button>
             ))}
           </div>
+
+          {/* Department Filter */}
+          <Select value={deptFilter} onValueChange={setDeptFilter}>
+            <SelectTrigger className="w-full sm:w-40 shrink-0">
+              <div className="flex items-center gap-2">
+                <GraduationCap className="size-4 shrink-0 text-muted-foreground" />
+                <SelectValue placeholder="All Depts" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              <SelectItem value="Science">Science</SelectItem>
+              <SelectItem value="Art">Art</SelectItem>
+              <SelectItem value="Commerce">Commerce</SelectItem>
+            </SelectContent>
+          </Select>
 
           {/* ─── FIXED: Search box — improved placeholder, clear button, full width on mobile ─── */}
           <div className="relative flex-1 min-w-0">
@@ -1059,10 +1079,12 @@ export default function StudentListView() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12">#</TableHead>
+                    <TableHead className="w-10">Photo</TableHead>
                     <TableHead>Reg No</TableHead>
                     <TableHead>Fullname</TableHead>
                     <TableHead>Gender</TableHead>
                     <TableHead>Class</TableHead>
+                    <TableHead>Department</TableHead>
                     <TableHead>Basic</TableHead>
                     <TableHead className="w-28 text-right">Actions</TableHead>
                   </TableRow>
@@ -1072,6 +1094,16 @@ export default function StudentListView() {
                     <TableRow key={student.id}>
                       <TableCell className="font-medium text-muted-foreground">
                         {index + 1}
+                      </TableCell>
+                      <TableCell>
+                        <Avatar className="size-7">
+                          {student.imageUrl ? (
+                            <AvatarImage src={student.imageUrl} alt={student.fullname} />
+                          ) : null}
+                          <AvatarFallback className="text-[10px]">
+                            {student.fullname?.split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
                       </TableCell>
                       {/* ─── FIXED: RegNo with show/copy button ─── */}
                       <TableCell>
@@ -1090,6 +1122,13 @@ export default function StudentListView() {
                       <TableCell>{student.gender || "—"}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{student.class}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {student.department ? (
+                          <Badge variant="secondary" className="text-[10px]">{student.department}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
                       </TableCell>
                       <TableCell>{student.basic || "—"}</TableCell>
                       <TableCell className="text-right">
@@ -1158,25 +1197,36 @@ export default function StudentListView() {
               <Card key={student.id}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          #{index + 1}
-                        </span>
-                        <Badge variant="outline">{student.class}</Badge>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => openDetail(student)}
-                        className="mt-1 w-full text-left"
-                      >
-                        <h3 className="truncate font-semibold hover:underline hover:text-primary">
-                          {student.fullname}
-                        </h3>
-                      </button>
-                      {/* ─── FIXED: RegNo with show/copy button on mobile ─── */}
-                      <div className="mt-1">
-                        <RegNoCell regNo={student.regNo} compact />
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <Avatar className="size-10 shrink-0">
+                        {student.imageUrl ? (
+                          <AvatarImage src={student.imageUrl} alt={student.fullname} />
+                        ) : null}
+                        <AvatarFallback className="text-xs">
+                          {student.fullname?.split(" ").filter(Boolean).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            #{index + 1}
+                          </span>
+                          <Badge variant="outline">{student.class}</Badge>
+                          {student.department && <Badge variant="secondary" className="text-[10px]">{student.department}</Badge>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openDetail(student)}
+                          className="mt-1 w-full text-left"
+                        >
+                          <h3 className="truncate font-semibold hover:underline hover:text-primary">
+                            {student.fullname}
+                          </h3>
+                        </button>
+                        {/* ─── FIXED: RegNo with show/copy button on mobile ─── */}
+                        <div className="mt-1">
+                          <RegNoCell regNo={student.regNo} compact />
+                        </div>
                       </div>
                     </div>
                     <div className="flex shrink-0 gap-1">
@@ -1784,13 +1834,12 @@ export default function StudentListView() {
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  className={`relative flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors ${
-                    importDragOver
-                      ? "border-primary bg-primary/5"
-                      : importFile
-                        ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/30"
-                        : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                  }`}
+                  className={`relative flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors ${importDragOver
+                    ? "border-primary bg-primary/5"
+                    : importFile
+                      ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/30"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                    }`}
                 >
                   <input
                     ref={fileInputRef}

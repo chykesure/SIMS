@@ -46,18 +46,19 @@ export async function POST(request: Request) {
       where: { email: sanitizedEmail },
     });
 
+    // If not found by email, try looking up a student by regNo (case-insensitive)
     // If not found by email, try looking up a student by regNo and match their user
     if (!user) {
       const tenantId = request.headers.get("x-tenant-id");
 
-      // Try to find student by regNo
-      const student = tenantId
-        ? await db.student.findFirst({
-          where: { regNo: sanitizedEmail, tenantId },
-        })
-        : await db.student.findFirst({
-          where: { regNo: sanitizedEmail },
-        });
+      // SQLite doesn't support mode: "insensitive", so fetch all and filter in JS
+      const allStudents = tenantId
+        ? await db.student.findMany({ where: { tenantId } })
+        : await db.student.findMany();
+
+      const student = allStudents.find(
+        (s) => s.regNo.toLowerCase() === sanitizedEmail.toLowerCase()
+      );
 
       if (student) {
         // Look for an existing User linked to this student
@@ -72,11 +73,11 @@ export async function POST(request: Request) {
         if (existingUser) {
           user = existingUser;
         } else {
-          // AUTO-CREATE: If student exists but no User account, create one
+          // 🔥 AUTO-CREATE: If student exists but no User account, create one
           const defaultPassword = student.regNo.toLowerCase();
 
-          // Only auto-create if the password matches the default
-          if (sanitizedPassword === defaultPassword) {
+          // Only auto-create if the password matches the default (case-insensitive)
+          if (sanitizedPassword.toLowerCase() === defaultPassword.toLowerCase()) {
             user = await db.user.create({
               data: {
                 email: sanitizedEmail,
@@ -89,31 +90,17 @@ export async function POST(request: Request) {
               },
             });
           } else {
-            // Student exists, User doesn't exist yet — check if password matches default (case-insensitive)
-            if (sanitizedPassword.toLowerCase() === defaultPassword) {
-              user = await db.user.create({
-                data: {
-                  email: sanitizedEmail,
-                  username: student.fullname || `Student-${student.regNo}`,
-                  password: sanitizedPassword,
-                  role: "STUDENT",
-                  studentId: student.id,
-                  tenantId: student.tenantId,
-                  imageUrl: student.imageUrl || undefined,
-                },
-              });
-            } else {
-              await loginSecurity.onFailed("User not found (no account)");
+            // Student exists, User doesn't exist yet — wrong password
+            await loginSecurity.onFailed("User not found (no account)");
 
-              return NextResponse.json(
-                {
-                  success: false,
-                  message: "No login account found for this student. Please contact your school admin to create your login credentials.",
-                  code: "NO_USER_ACCOUNT",
-                },
-                { status: 401 }
-              );
-            }
+            return NextResponse.json(
+              {
+                success: false,
+                message: "No login account found for this student. Please contact your school admin to create your login credentials.",
+                code: "NO_USER_ACCOUNT",
+              },
+              { status: 401 }
+            );
           }
         }
       }
@@ -134,32 +121,21 @@ export async function POST(request: Request) {
     }
 
     // Plain text password comparison (for demo with SQLite)
-    if (user.password !== sanitizedPassword) {
-      // Fallback: case-insensitive match for student accounts created with
-      // the default lowercase regNo password (auto-created accounts)
-      const isDefaultPasswordAccount =
-        user.password === user.password.toLowerCase() &&
-        sanitizedPassword.toLowerCase() === user.password;
-
-      if (!isDefaultPasswordAccount) {
-        // ---- Security: Log failed attempt ----
+    // Case-insensitive for student accounts (regNo passwords)
+    if (user.role === "STUDENT") {
+      if (user.password.toLowerCase() !== sanitizedPassword.toLowerCase()) {
         await loginSecurity.onFailed("Invalid password");
-
         return NextResponse.json(
-          {
-            success: false,
-            message: "The password you entered is incorrect. Please check your password and try again.",
-            code: "INVALID_PASSWORD",
-          },
+          { success: false, message: "The password you entered is incorrect. Please check your password and try again.", code: "INVALID_PASSWORD" },
           { status: 401 }
         );
       }
-
-      // Update the stored password to the user's preferred casing for future logins
-      await db.user.update({
-        where: { id: user.id },
-        data: { password: sanitizedPassword },
-      });
+    } else if (user.password !== sanitizedPassword) {
+      await loginSecurity.onFailed("Invalid password");
+      return NextResponse.json(
+        { success: false, message: "The password you entered is incorrect. Please check your password and try again.", code: "INVALID_PASSWORD" },
+        { status: 401 }
+      );
     }
 
     // Fetch tenant info

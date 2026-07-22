@@ -106,6 +106,7 @@ interface StudentData {
   class: string;
   imageUrl: string;
   dateOfBirth: string;
+  department: string;
 }
 
 interface SchoolSettings {
@@ -761,14 +762,28 @@ export default function ResultView() {
         fetch("/api/settings?type=signatures"), fetch("/api/settings?type=resumptions"),
       ]);
       if (scoreRes.ok) {
-        const scores = await scoreRes.json();
+        const scores: ExamScoreDetail[] = await scoreRes.json();
         if (!scores || scores.length === 0) {
           toast.error("No scores found for this student. Scores must be entered first.");
           setReportLoading(false);
           setReportOpen(false);
           return;
         }
-        setReportScores(scores);
+
+        // Step 1: Hide subjects where both CA and Exam are 0
+        const noZeroScores = scores.filter((s: any) => {
+          const caTotal = (Number(s.firstCa) || 0) + (Number(s.secondCa) || 0) + (Number(s.thirdCa) || 0);
+          const examVal = Number(s.exam) || 0;
+          return caTotal > 0 || examVal > 0;
+        });
+
+                // Hide subjects where both CA and Exam are 0
+        const filtered = scores.filter((s: any) => {
+          const caTotal = (Number(s.firstCa) || 0) + (Number(s.secondCa) || 0) + (Number(s.thirdCa) || 0);
+          const examVal = Number(s.exam) || 0;
+          return caTotal > 0 || examVal > 0;
+        });
+        setReportScores(filtered);
       } else {
         setReportScores([]);
       }
@@ -939,18 +954,27 @@ export default function ResultView() {
 
   const prevTerms: number[] = isThirdTerm ? [1, 2] : isSecondTerm ? [1] : [];
 
+  // Hide subjects where both CA and Exam are 0
+  const visibleScores = useMemo(() => {
+    return reportScores.filter((sc) => {
+      const hasCa = (sc.firstCa > 0) || (sc.secondCa > 0) || (sc.thirdCa > 0);
+      const hasExam = sc.exam > 0;
+      return hasCa || hasExam;
+    });
+  }, [reportScores]);
+
   const columnTotals_calc = reportScores.length > 0
     ? (() => {
-        const caTotals: number[] = new Array(caCount).fill(0);
-        reportScores.forEach((sc) => {
-          const mapped = mapCaScores(sc, caCount);
-          mapped.forEach((val, i) => { caTotals[i] += val || 0; });
-        });
-        return {
-          caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
-          examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
-        };
-      })()
+      const caTotals: number[] = new Array(caCount).fill(0);
+      reportScores.forEach((sc) => {
+        const mapped = mapCaScores(sc, caCount);
+        mapped.forEach((val, i) => { caTotals[i] += val || 0; });
+      });
+      return {
+        caTotals: caTotals.map(t => parseFloat(t.toFixed(1))),
+        examTotal: parseFloat(reportScores.reduce((s, e) => s + (e.exam || 0), 0).toFixed(1)),
+      };
+    })()
     : { caTotals: new Array(caCount).fill(0) as number[], examTotal: 0 };
 
   const studentTotalFromScores = parseFloat(reportScores.reduce((s, e) => s + (e.total || 0), 0).toFixed(1));
@@ -1258,6 +1282,9 @@ export default function ResultView() {
                           <div><span style={RC.infoLabel}>Name:</span> <span style={RC.infoValue}>{reportStudent.fullname}</span></div>
                           <div><span style={RC.infoLabel}>Reg No:</span> <span style={RC.infoValue}>{studentData?.regNo || "N/A"}</span></div>
                           <div><span style={RC.infoLabel}>Gender:</span> <span style={RC.infoValue}>{studentData?.gender || "N/A"}</span></div>
+                          {studentData?.department && (
+                            <div><span style={RC.infoLabel}>Department:</span> <span style={RC.infoValue}>{studentData.department}</span></div>
+                          )}
                           <div><span style={RC.infoLabel}>Class:</span> <span style={RC.infoValue}>{reportStudent.class}</span></div>
                           <div><span style={RC.infoLabel}>Session:</span> <span style={RC.infoValue}>{reportStudent.session}</span></div>
                           <div><span style={RC.infoLabel}>Term:</span> <span style={RC.infoValue}>{reportStudent.term}</span></div>
