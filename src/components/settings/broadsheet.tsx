@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Table, FileSpreadsheet, Download, Loader2 } from "lucide-react";
+import { Table, FileSpreadsheet, Download, Loader2, FileDown } from "lucide-react";
 import { useAppStore } from "@/store/index";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,7 +44,22 @@ interface BroadsheetRow {
   total: number;
   average: number;
   position: number;
+  prevTermTotals: number[];
+  cumTotal: number;
+  cumAvg: number;
 }
+
+const TERM_BY_NUM: Record<number, string> = {
+  1: "First Term",
+  2: "Second Term",
+  3: "Third Term",
+};
+
+const TERM_NUM_MAP: Record<string, number> = {
+  "First Term": 1,
+  "Second Term": 2,
+  "Third Term": 3,
+};
 
 export default function BroadsheetView() {
   const { tenant } = useAppStore();
@@ -58,6 +73,7 @@ export default function BroadsheetView() {
   const [rows, setRows] = useState<BroadsheetRow[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
   const [generated, setGenerated] = useState(false);
+  const [termNum, setTermNum] = useState(1);
 
   const fetchDropdowns = useCallback(async () => {
     try {
@@ -89,6 +105,17 @@ export default function BroadsheetView() {
     fetchDropdowns();
   }, [fetchDropdowns]);
 
+  const fetchScores = async (term: string): Promise<ExamScore[]> => {
+    const params = new URLSearchParams({
+      session: selectedSession,
+      class: selectedClass,
+      term,
+    });
+    const res = await fetch(`/api/exams?${params}`);
+    if (!res.ok) throw new Error(`Failed to fetch ${term} scores`);
+    return res.json();
+  };
+
   const handleGenerate = async () => {
     if (!selectedSession || !selectedClass || !selectedTerm) {
       toast.error("Please select Session, Class, and Term");
@@ -98,17 +125,18 @@ export default function BroadsheetView() {
       setDataLoading(true);
       setGenerated(false);
 
-      // Fetch ONLY the selected term — no cumulative, no extra prompts
-      const params = new URLSearchParams({
-        session: selectedSession,
-        class: selectedClass,
-        term: selectedTerm,
-      });
-      const res = await fetch(`/api/exams?${params}`);
-      if (!res.ok) throw new Error("Failed to fetch exam scores");
-      const scores: ExamScore[] = await res.json();
+      const currentTermNum = TERM_NUM_MAP[selectedTerm] || 1;
+      setTermNum(currentTermNum);
 
-      if (scores.length === 0) {
+      const termsToFetch: string[] = [];
+      for (let t = 1; t <= currentTermNum; t++) {
+        termsToFetch.push(TERM_BY_NUM[t]);
+      }
+
+      const allResults = await Promise.all(termsToFetch.map((t) => fetchScores(t)));
+      const currentTermScores: ExamScore[] = allResults[allResults.length - 1];
+
+      if (currentTermScores.length === 0) {
         toast.info("No exam scores found for the selected criteria");
         setRows([]);
         setSubjects([]);
@@ -116,24 +144,26 @@ export default function BroadsheetView() {
         return;
       }
 
-      // Normalize fullname for consistent grouping
-      const normalize = (name: string) =>
-        name.trim().toUpperCase().replace(/\s+/g, " ");
+      const uniqueSubjects = [...new Set(currentTermScores.map((s) => s.subject))].sort();
+      const uniqueStudents = [...new Set(currentTermScores.map((s) => s.fullname))].sort();
 
-      const uniqueSubjects = [...new Set(scores.map((s) => s.subject))].sort();
-      const studentMap = new Map<string, ExamScore[]>();
+      // Pre-compute each term's totals per student using THAT term's own scores
+      const termTotalsMap: Record<string, number[]> = {};
 
-      for (const score of scores) {
-        const key = normalize(score.fullname);
-        const existing = studentMap.get(key) || [];
-        existing.push(score);
-        studentMap.set(key, existing);
+      for (const name of uniqueStudents) {
+        termTotalsMap[name] = [];
+        for (let t = 0; t < allResults.length; t++) {
+          const termScores = allResults[t].filter((s) => s.fullname === name);
+          let termTotal = 0;
+          for (const sc of termScores) {
+            termTotal += sc.total;
+          }
+          termTotalsMap[name].push(parseFloat(termTotal.toFixed(2)));
+        }
       }
 
-      const uniqueStudents = [...studentMap.keys()].sort();
-
       const studentRows: BroadsheetRow[] = uniqueStudents.map((name) => {
-        const studentScores = studentMap.get(name) || [];
+        const studentScores = currentTermScores.filter((s) => s.fullname === name);
         const subjectMap: Record<string, number> = {};
         let total = 0;
         for (const subj of uniqueSubjects) {
@@ -142,22 +172,39 @@ export default function BroadsheetView() {
           subjectMap[subj] = val;
           total += val;
         }
+
+        const allTermTotals = termTotalsMap[name];
+        const prevTermTotals = allTermTotals.slice(0, -1);
+
+        const cumTotal = allTermTotals.reduce((s, v) => s + v, 0);
+        const cumAvg = currentTermNum > 0
+          ? parseFloat((cumTotal / currentTermNum).toFixed(2))
+          : 0;
+
         return {
           fullname: name,
           subjects: subjectMap,
-          total: parseFloat(total.toFixed(1)),
-          average: uniqueSubjects.length > 0
-            ? parseFloat((total / uniqueSubjects.length).toFixed(2))
-            : 0,
+          total: parseFloat(total.toFixed(2)),
+          average: uniqueSubjects.length > 0 ? parseFloat((total / uniqueSubjects.length).toFixed(2)) : 0,
           position: 0,
+          prevTermTotals,
+          cumTotal: parseFloat(cumTotal.toFixed(2)),
+          cumAvg,
         };
       });
 
-      // Assign positions (ties get same position)
-      const sorted = [...studentRows].sort((a, b) => b.total - a.total);
+      // Assign positions based on cumulative average (or current term total for 1st term)
+      const useCumulative = currentTermNum >= 2;
+      const sorted = [...studentRows].sort((a, b) =>
+        useCumulative ? b.cumAvg - a.cumAvg : b.total - a.total
+      );
       let pos = 1;
       sorted.forEach((row, idx) => {
-        if (idx > 0 && row.total < sorted[idx - 1].total) pos = idx + 1;
+        if (idx > 0) {
+          const val = useCumulative ? row.cumAvg : row.total;
+          const prev = useCumulative ? sorted[idx - 1].cumAvg : sorted[idx - 1].total;
+          if (val < prev) pos = idx + 1;
+        }
         row.position = pos;
       });
 
@@ -172,16 +219,17 @@ export default function BroadsheetView() {
     }
   };
 
-  const getCellBg = (score: number): string => {
-    if (score >= 50) return "#dcfce7";
-    if (score >= 40) return "#fef9c3";
-    return "#fee2e2";
+  const getCellColor = (score: number): string => {
+    if (score >= 50) return "background:#dcfce7; color:#166534;";
+    if (score >= 40) return "background:#fef9c3; color:#854d0e;";
+    return "background:#fee2e2; color:#991b1b;";
   };
 
-  const getCellColor = (score: number): string => {
-    if (score >= 50) return "#166534";
-    if (score >= 40) return "#854d0e";
-    return "#991b1b";
+  const getPositionColor = (position: number): string => {
+    if (position === 1) return "background:#facc15; color:#713f12; font-weight:700;";
+    if (position === 2) return "background:#d1d5db; color:#1f2937; font-weight:700;";
+    if (position === 3) return "background:#f59e0b; color:#fff; font-weight:700;";
+    return "font-weight:600;";
   };
 
   const getPositionBadgeStyle = (position: number): React.CSSProperties => {
@@ -191,20 +239,94 @@ export default function BroadsheetView() {
     return { background: "#f1f5f9", color: "#475569" };
   };
 
-  function getPosSuffix(p: number): string {
-    if (p === 1 || p === 21 || p === 31) return "st";
-    if (p === 2 || p === 22 || p === 32) return "nd";
-    if (p === 3 || p === 23 || p === 33) return "rd";
-    return "th";
+  const hasCumulative = termNum >= 2;
+  const prevTermLabels = hasCumulative
+    ? Array.from({ length: termNum - 1 }, (_, i) => `${TERM_BY_NUM[i + 1]} Total`)
+    : [];
+
+  function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
   }
 
   /* ================================================================
-     PDF DOWNLOAD — Landscape A4, no shrinking, complete rows
+     EXCEL DOWNLOAD
+     ================================================================ */
+  const handleDownloadExcel = () => {
+    if (rows.length === 0) return;
+
+    const schoolName = tenant?.name || "School";
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Broadsheet</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>
+<table border="1" cellpadding="3" cellspacing="0" style="border-collapse:collapse;">`;
+
+    // Title row
+    const totalCols = 2 + subjects.length + 3 + prevTermLabels.length + (hasCumulative ? 2 : 0);
+    html += `<tr><td colspan="${totalCols}" style="font-size:14px;font-weight:bold;text-align:center;">${schoolName} — Broadsheet</td></tr>`;
+    html += `<tr><td colspan="${totalCols}" style="font-size:11px;text-align:center;">${selectedClass} | ${selectedTerm} | ${selectedSession}</td></tr>`;
+    html += `<tr></tr>`;
+
+    // Header row
+    html += `<tr>
+      <td style="font-weight:bold;background:#065f46;color:#fff;text-align:center;">#</td>
+      <td style="font-weight:bold;background:#065f46;color:#fff;">Student Name</td>`;
+    for (const subj of subjects) {
+      html += `<td style="font-weight:bold;background:#065f46;color:#fff;text-align:center;">${subj}</td>`;
+    }
+    html += `<td style="font-weight:bold;background:#065f46;color:#fff;text-align:center;">Total</td>
+      <td style="font-weight:bold;background:#065f46;color:#fff;text-align:center;">Average</td>`;
+    for (const label of prevTermLabels) {
+      html += `<td style="font-weight:bold;background:#ea580c;color:#fff;text-align:center;">${label}</td>`;
+    }
+    if (hasCumulative) {
+      html += `<td style="font-weight:bold;background:#2563eb;color:#fff;text-align:center;">Cum Total</td>
+        <td style="font-weight:bold;background:#2563eb;color:#fff;text-align:center;">Cum Avg</td>`;
+    }
+    html += `<td style="font-weight:bold;background:#065f46;color:#fff;text-align:center;">Position</td>`;
+    html += `</tr>`;
+
+    // Data rows
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      html += `<tr>
+        <td style="text-align:center;">${i + 1}</td>
+        <td>${row.fullname}</td>`;
+      for (const subj of subjects) {
+        html += `<td style="text-align:center;">${row.subjects[subj] || 0}</td>`;
+      }
+      html += `<td style="text-align:center;font-weight:bold;">${row.total}</td>
+        <td style="text-align:center;">${row.average}</td>`;
+      for (const pt of row.prevTermTotals) {
+        html += `<td style="text-align:center;font-weight:bold;">${pt}</td>`;
+      }
+      if (hasCumulative) {
+        html += `<td style="text-align:center;font-weight:bold;">${row.cumTotal}</td>
+          <td style="text-align:center;font-weight:bold;">${row.cumAvg}</td>`;
+      }
+      html += `<td style="text-align:center;font-weight:bold;">${row.position}</td>`;
+      html += `</tr>`;
+    }
+
+    html += `</table></body></html>`;
+
+    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Broadsheet_${selectedClass.replace(/\s+/g, "_")}_${selectedTerm.replace(/\s+/g, "_")}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Excel downloaded successfully");
+  };
+
+  /* ================================================================
+     PDF / PRINT
      ================================================================ */
   const handleDownloadPDF = () => {
     if (rows.length === 0) return;
 
     const pc = tenant?.primaryColor || "#065f46";
+    const pcRgb = hexToRgb(pc) || { r: 6, g: 95, b: 70 };
     const schoolName = tenant?.name || "School";
     const motto = tenant?.motto || "";
     const address = tenant?.address || "";
@@ -212,109 +334,121 @@ export default function BroadsheetView() {
     const phone = tenant?.phone || "";
     const email = tenant?.email || "";
 
-    const numSubj = subjects.length;
-    const totalCols = numSubj + 6; // #, Name, subjects..., Total, Avg, Pos
+    const cumCols = hasCumulative ? prevTermLabels.length + 2 : 0;
+    const totalCols = 3 + subjects.length + 2 + cumCols + 1; // # + Name + subjects + Total + Avg + prevTerms + cum + Pos
 
-    // Dynamic column widths as percentages — always adds up to 100%
-    // # = 2%, Name = 13%, Pos = 3%, Total = 4.5%, Avg = 4.5%, subjects share the rest
-    const fixedPct = 2 + 13 + 3 + 4.5 + 4.5; // 27%
-    const subjPct = ((100 - fixedPct) / numSubj).toFixed(3);
+    let headerHtml = "";
+    headerHtml += `<tr>
+      <td colspan="${totalCols}" style="text-align:center; padding:8px 6px 2px; border:1px solid #333; background:${pc}; color:#fff; font-size:14px; font-weight:800; letter-spacing:1px; text-transform:uppercase;">
+        ${schoolName}${motto ? ` &mdash; &ldquo;${motto}&rdquo;` : ""}
+      </td>
+    </tr>`;
+    headerHtml += `<tr>
+      <td colspan="${totalCols}" style="text-align:center; padding:2px 6px 2px; border:1px solid #333; background:${pc}; color:rgba(255,255,255,0.85); font-size:8px;">
+        ${[address && state ? `${address}, ${state}` : "", phone, email].filter(Boolean).join(" &bull; ")}
+      </td>
+    </tr>`;
+    headerHtml += `<tr>
+      <td colspan="${totalCols}" style="text-align:center; padding:4px 6px; border:1px solid #333; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.12); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:${pc};">
+        Broadsheet &mdash; ${selectedClass} &bull; ${selectedTerm} &bull; ${selectedSession}
+      </td>
+    </tr>`;
 
-    const contactParts = [address && state ? `${address}, ${state}` : "", phone, email].filter(Boolean).join("  |  ");
-    const genDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-    const genTime = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    // Column headers — Position is LAST
+    headerHtml += `<tr>
+      <td style="padding:4px 3px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px; width:30px;">#</td>
+      <td style="padding:4px 6px; border:1px solid #333; background:${pc}; color:#fff; text-align:left; font-weight:700; font-size:8px; min-width:130px; white-space:nowrap;">Student Name</td>`;
+    for (const subj of subjects) {
+      headerHtml += `<td style="padding:4px 2px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:7px; writing-mode:vertical-rl; text-orientation:mixed; height:80px; max-width:25px;">${subj}</td>`;
+    }
+    headerHtml += `<td style="padding:4px 3px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px;">Total</td>
+      <td style="padding:4px 3px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px;">Average</td>`;
+    for (const label of prevTermLabels) {
+      headerHtml += `<td style="padding:4px 3px; border:1px solid #333; background:#ea580c; color:#fff; text-align:center; font-weight:700; font-size:7px;">${label}</td>`;
+    }
+    if (hasCumulative) {
+      headerHtml += `<td style="padding:4px 3px; border:1px solid #333; background:#2563eb; color:#fff; text-align:center; font-weight:700; font-size:7px;">Cum Total</td>
+        <td style="padding:4px 3px; border:1px solid #333; background:#2563eb; color:#fff; text-align:center; font-weight:700; font-size:7px;">Cum Avg</td>`;
+    }
+    headerHtml += `<td style="padding:4px 3px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px;">Pos</td>`;
+    headerHtml += `</tr>`;
 
-    // --- Build Subject Header Cells (vertical text to save space) ---
-    const subjHeaderCells = subjects.map((subj) => `
-      <th style="
-        padding:0 1px;
-        border:1px solid #333;
-        background:${pc};
-        color:#fff;
-        text-align:center;
-        font-weight:700;
-        font-size:7.5px;
-        width:${subjPct}%;
-        vertical-align:bottom;
-        height:90px;
-      ">
-        <div style="
-          writing-mode:vertical-rl;
-          text-orientation:mixed;
-          transform:rotate(180deg);
-          white-space:nowrap;
-          letter-spacing:0.5px;
-        ">${subj}</div>
-      </th>`).join("");
-
-    // --- Build Data Rows ---
-    const dataRowsHtml = rows.map((row, i) => {
-      const bg = i % 2 === 1 ? "#f9fafb" : "#fff";
-      const subjCells = subjects.map((subj) => {
+    // Data rows — Position is LAST
+    let bodyHtml = "";
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const isAlt = i % 2 === 1;
+      const bgStyle = isAlt ? "background:#f9fafb;" : "";
+      bodyHtml += `<tr>
+        <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; ${bgStyle}">${i + 1}</td>
+        <td style="padding:3px 6px; border:1px solid #bbb; text-align:left; font-size:8px; font-weight:500; white-space:nowrap; ${bgStyle}">${row.fullname}</td>`;
+      for (const subj of subjects) {
         const score = row.subjects[subj] || 0;
-        return `<td style="
-          padding:3px 1px;
-          border:1px solid #bbb;
-          text-align:center;
-          font-size:8.5px;
-          font-weight:600;
-          background:${getCellBg(score)};
-          color:${getCellColor(score)};
-        ">${score}</td>`;
-      }).join("");
+        bodyHtml += `<td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:600; ${getCellColor(score)}">${score}</td>`;
+      }
+      bodyHtml += `<td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:9px; font-weight:800; ${bgStyle}">${row.total}</td>
+        <td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:600; ${bgStyle}">${row.average.toFixed(1)}</td>`;
+      for (const pt of row.prevTermTotals) {
+        bodyHtml += `<td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:9px; font-weight:700; ${bgStyle} background:rgba(234,88,12,0.06);">${pt}</td>`;
+      }
+      if (hasCumulative) {
+        bodyHtml += `<td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:9px; font-weight:800; ${bgStyle} background:rgba(37,99,235,0.06);">${row.cumTotal}</td>
+          <td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:700; ${bgStyle} background:rgba(37,99,235,0.06);">${row.cumAvg.toFixed(1)}</td>`;
+      }
+      bodyHtml += `<td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:8px; ${getPositionColor(row.position)}">${row.position}</td>`;
+      bodyHtml += `</tr>`;
+    }
 
-      const posBg = row.position === 1 ? "#facc15" : row.position === 2 ? "#d1d5db" : row.position === 3 ? "#f59e0b" : "transparent";
-      const posColor = row.position === 1 ? "#713f12" : row.position === 2 ? "#1f2937" : row.position === 3 ? "#fff" : "#374151";
-
-      return `<tr style="background:${bg};">
-        <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8.5px; width:2%;">${i + 1}</td>
-        <td style="padding:3px 4px; border:1px solid #bbb; text-align:left; font-size:8.5px; font-weight:500; white-space:nowrap; width:13%;">${row.fullname}</td>
-        ${subjCells}
-        <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:9px; font-weight:800; width:4.5%;">${Number(row.total).toFixed(1)}</td>
-        <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8.5px; font-weight:600; width:4.5%;">${row.average.toFixed(1)}</td>
-        <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8.5px; font-weight:700; width:3%; background:${posBg}; color:${posColor};">${row.position}${getPosSuffix(row.position)}</td>
-      </tr>`;
-    }).join("\n");
-
-    // --- Summary Row ---
+    // Summary row — Position is LAST
     const classTotal = rows.reduce((s, r) => s + r.total, 0);
     const classAvg = rows.length > 0 ? (classTotal / rows.length).toFixed(1) : "0";
-
-    const summarySubjCells = subjects.map((subj) => {
-      const avg = rows.length > 0
-        ? (rows.reduce((s, r) => s + (r.subjects[subj] || 0), 0) / rows.length).toFixed(1)
-        : "0";
-      return `<td style="padding:4px 1px; border:1px solid #333; text-align:center; font-size:8px; font-weight:700; background:${pc}0F;">${avg}</td>`;
-    }).join("");
-
-    // --- Highest / Lowest Rows ---
-    let highLowRows = "";
-    if (rows.length > 0) {
-      const high = rows[0];
-      const low = rows[rows.length - 1];
-
-      const highCells = subjects.map((subj) => {
-        const max = Math.max(...rows.map((r) => r.subjects[subj] || 0));
-        return `<td style="padding:2px 1px; border:1px solid #bbb; text-align:center; font-size:7.5px; font-weight:600; color:#166534;">${max}</td>`;
-      }).join("");
-
-      const lowCells = subjects.map((subj) => {
-        const min = Math.min(...rows.map((r) => r.subjects[subj] || 0));
-        return `<td style="padding:2px 1px; border:1px solid #bbb; text-align:center; font-size:7.5px; font-weight:600; color:#991b1b;">${min}</td>`;
-      }).join("");
-
-      highLowRows = `
-      <tr>
-        <td colspan="2" style="padding:3px 4px; border:1px solid #bbb; font-size:7.5px; font-weight:600;">HIGHEST: ${high.fullname} (${high.total})</td>
-        ${highCells}
-        <td colspan="3" style="border:1px solid #bbb;"></td>
-      </tr>
-      <tr>
-        <td colspan="2" style="padding:3px 4px; border:1px solid #bbb; font-size:7.5px; font-weight:600;">LOWEST: ${low.fullname} (${low.total})</td>
-        ${lowCells}
-        <td colspan="3" style="border:1px solid #bbb;"></td>
-      </tr>`;
+    bodyHtml += `<tr>
+      <td colspan="2" style="padding:4px 6px; border:1px solid #333; font-weight:700; font-size:8px; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">CLASS TOTAL / AVERAGE</td>`;
+    for (const subj of subjects) {
+      const subjTotal = rows.reduce((s, r) => s + (r.subjects[subj] || 0), 0);
+      const subjAvg = rows.length > 0 ? (subjTotal / rows.length).toFixed(1) : "0";
+      bodyHtml += `<td style="padding:3px 2px; border:1px solid #333; text-align:center; font-size:7px; font-weight:700; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">${subjAvg}</td>`;
     }
+    bodyHtml += `<td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:800; font-size:9px; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">${classTotal}</td>
+      <td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:700; font-size:8px; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">${classAvg}</td>`;
+    for (let p = 0; p < prevTermLabels.length; p++) {
+      const prevSum = rows.reduce((s, r) => s + (r.prevTermTotals[p] || 0), 0);
+      bodyHtml += `<td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:800; font-size:9px; background:rgba(234,88,12,0.08);">${prevSum.toFixed(0)}</td>`;
+    }
+    if (hasCumulative) {
+      const cumClassTotal = rows.reduce((s, r) => s + r.cumTotal, 0);
+      const cumClassAvg = rows.length > 0 ? (rows.reduce((s, r) => s + r.cumAvg, 0) / rows.length).toFixed(1) : "0";
+      bodyHtml += `<td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:800; font-size:9px; background:rgba(37,99,235,0.08);">${cumClassTotal.toFixed(0)}</td>
+        <td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:700; font-size:8px; background:rgba(37,99,235,0.08);">${cumClassAvg}</td>`;
+    }
+    bodyHtml += `<td style="padding:4px 3px; border:1px solid #333; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);"></td>`;
+    bodyHtml += `</tr>`;
+
+    // Highest & Lowest
+    if (rows.length > 0) {
+      const highest = rows[0];
+      const lowest = rows[rows.length - 1];
+      const endCols = cumCols + 1; // +1 for Position
+      bodyHtml += `<tr>
+        <td colspan="2" style="padding:3px 6px; border:1px solid #bbb; font-size:7px; font-weight:600;">HIGHEST: ${highest.fullname} (${highest.total})</td>`;
+      for (const subj of subjects) {
+        const maxScore = Math.max(...rows.map((r) => r.subjects[subj] || 0));
+        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#166534;">${maxScore}</td>`;
+      }
+      bodyHtml += `<td colspan="${endCols}" style="border:1px solid #bbb;"></td></tr>`;
+      bodyHtml += `<tr>
+        <td colspan="2" style="padding:3px 6px; border:1px solid #bbb; font-size:7px; font-weight:600;">LOWEST: ${lowest.fullname} (${lowest.total})</td>`;
+      for (const subj of subjects) {
+        const minScore = Math.min(...rows.map((r) => r.subjects[subj] || 0));
+        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#991b1b;">${minScore}</td>`;
+      }
+      bodyHtml += `<td colspan="${endCols}" style="border:1px solid #bbb;"></td></tr>`;
+    }
+
+    // Grading key
+    bodyHtml += `<tr><td colspan="${totalCols}" style="padding:4px 6px; border:1px solid #bbb; font-size:7px; color:#6b7280;">
+      Grading: A1=75-100 | B2=70-74 | B3=65-69 | C4=60-64 | C5=55-59 | C6=50-54 | D7=45-49 | E8=40-44 | F9=0-39
+    </td></tr>`;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -322,90 +456,29 @@ export default function BroadsheetView() {
 <meta charset="UTF-8"/>
 <title>Broadsheet - ${selectedClass} - ${selectedTerm}</title>
 <style>
-  @page { size: A4 landscape; margin: 5mm; }
+  @page { size: A4 landscape; margin: 8mm 10mm; }
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-  html, body {
-    width:100%;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color:#000;
-    background:#fff;
-    -webkit-print-color-adjust:exact!important;
-    print-color-adjust:exact!important;
-    color-adjust:exact!important;
-  }
-  table {
-    width:100%;
-    border-collapse:collapse;
-    table-layout:fixed;
-  }
+  html, body { width:297mm; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; color:#000; background:#fff; -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; color-adjust:exact!important; font-size:9pt; }
+  table { width:100%; border-collapse:collapse; page-break-inside:auto; }
   thead { display:table-header-group; }
-  tbody { display:table-row-group; }
+  tr { page-break-inside:avoid; }
+  body { overflow:hidden; }
 </style>
 </head>
 <body>
 <table>
-  <!-- School Name -->
-  <tr>
-    <td colspan="${totalCols}" style="text-align:center; padding:8px 6px 3px; border:1px solid #333; background:${pc}; color:#fff; font-size:15px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase;">
-      ${schoolName}${motto ? ` &mdash; &ldquo;${motto}&rdquo;` : ""}
-    </td>
-  </tr>
-  ${contactParts ? `
-  <tr>
-    <td colspan="${totalCols}" style="text-align:center; padding:1px 6px 3px; border:1px solid #333; background:${pc}; color:rgba(255,255,255,0.85); font-size:8px;">
-      ${contactParts}
-    </td>
-  </tr>` : ""}
-  <!-- Title -->
-  <tr>
-    <td colspan="${totalCols}" style="text-align:center; padding:4px 6px; border:1px solid #333; background:${pc}14; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:${pc};">
-      BROADSHEET &mdash; ${selectedClass} &bull; ${selectedTerm} &bull; ${selectedSession}
-    </td>
-  </tr>
-  <!-- Column Headers -->
-  <tr>
-    <th style="padding:4px 2px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px; width:2%;">#</th>
-    <th style="padding:4px 4px; border:1px solid #333; background:${pc}; color:#fff; text-align:left; font-weight:700; font-size:8px; width:13%; white-space:nowrap;">Student Name</th>
-    ${subjHeaderCells}
-    <th style="padding:4px 2px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px; width:4.5%;">Total</th>
-    <th style="padding:4px 2px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px; width:4.5%;">Average</th>
-    <th style="padding:4px 2px; border:1px solid #333; background:${pc}; color:#fff; text-align:center; font-weight:700; font-size:8px; width:3%;">Pos.</th>
-  </tr>
-</thead>
-<tbody>
-  ${dataRowsHtml}
-  <!-- Class Summary -->
-  <tr>
-    <td colspan="2" style="padding:4px 4px; border:1px solid #333; font-weight:700; font-size:8px; background:${pc}0F;">CLASS TOTAL / AVERAGE</td>
-    ${summarySubjCells}
-    <td style="padding:4px 2px; border:1px solid #333; text-align:center; font-weight:800; font-size:9px; background:${pc}0F;">${classTotal}</td>
-    <td style="padding:4px 2px; border:1px solid #333; text-align:center; font-weight:700; font-size:8px; background:${pc}0F;">${classAvg}</td>
-    <td style="padding:4px 2px; border:1px solid #333; background:${pc}0F;"></td>
-  </tr>
-  ${highLowRows}
-  <!-- Grading Key -->
-  <tr>
-    <td colspan="${totalCols}" style="padding:4px 6px; border:1px solid #bbb; font-size:7px; color:#6b7280;">
-      Grading: A1 (75-100) | B2 (70-74) | B3 (65-69) | C4 (60-64) | C5 (55-59) | C6 (50-54) | D7 (45-49) | E8 (40-44) | F9 (0-39)
-    </td>
-  </tr>
-</tbody>
+  ${headerHtml}
+  ${bodyHtml}
 </table>
-<div style="text-align:center; font-size:7px; color:#999; padding-top:3px; margin-top:4px; border-top:1px solid #ddd;">
-  Generated on ${genDate} at ${genTime} &nbsp;|&nbsp; ${schoolName} &nbsp;|&nbsp; ${selectedClass} &bull; ${selectedTerm} &bull; ${selectedSession} &nbsp;|&nbsp; Total Students: ${rows.length}
-</div>
 </body>
 </html>`;
 
-    const printWin = window.open("", "_blank", "width=1200,height=800");
-    if (!printWin) {
-      toast.error("Please allow pop-ups to download the PDF");
-      return;
-    }
+    const printWin = window.open("", "_blank", "width=1100,height=800");
+    if (!printWin) { toast.error("Please allow pop-ups to print"); return; }
     printWin.document.write(html);
     printWin.document.close();
     printWin.focus();
-    setTimeout(() => { printWin.print(); }, 500);
+    setTimeout(() => { printWin.print(); }, 400);
     printWin.addEventListener("afterprint", () => printWin.close());
   };
 
@@ -459,12 +532,7 @@ export default function BroadsheetView() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Term</label>
-                <Select value={selectedTerm} onValueChange={(val) => {
-                  setSelectedTerm(val);
-                  setGenerated(false);
-                  setRows([]);
-                  setSubjects([]);
-                }}>
+                <Select value={selectedTerm} onValueChange={setSelectedTerm}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select term" />
                   </SelectTrigger>
@@ -492,15 +560,22 @@ export default function BroadsheetView() {
               )}
             </Button>
             {generated && rows.length > 0 && (
-              <Button variant="outline" onClick={handleDownloadPDF} className="gap-2">
-                <Download className="h-4 w-4" />
-                Download PDF (Landscape)
-              </Button>
+              <>
+                <Button variant="outline" onClick={handleDownloadExcel} className="gap-2">
+                  <FileDown className="h-4 w-4" />
+                  Download Excel
+                </Button>
+                <Button variant="outline" onClick={handleDownloadPDF} className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Download PDF
+                </Button>
+              </>
             )}
           </div>
         </CardContent>
       </Card>
 
+      {/* Broadsheet Table */}
       {generated && (
         <Card>
           <CardContent className="p-0">
@@ -516,24 +591,36 @@ export default function BroadsheetView() {
                 <UITable>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="sticky left-0 z-10 bg-muted w-10 text-center">#</TableHead>
+                      <TableHead className="sticky left-0 z-10 bg-muted w-10">#</TableHead>
                       <TableHead className="sticky left-10 z-10 bg-muted min-w-[150px]">
                         Student
                       </TableHead>
                       {subjects.map((subj) => (
-                        <TableHead key={subj} className="min-w-[70px] text-center px-2">
+                        <TableHead key={subj} className="min-w-[70px] text-center">
                           <span className="text-xs font-medium">{subj}</span>
                         </TableHead>
                       ))}
                       <TableHead className="min-w-[70px] text-center font-bold">Total</TableHead>
                       <TableHead className="min-w-[70px] text-center font-bold">Average</TableHead>
-                      <TableHead className="min-w-[60px] text-center font-bold">Pos</TableHead>
+                      {prevTermLabels.map((label) => (
+                        <TableHead key={label} className="min-w-[80px] text-center font-bold text-orange-700 bg-orange-50">
+                          {label}
+                        </TableHead>
+                      ))}
+                      {hasCumulative && (
+                        <>
+                          <TableHead className="min-w-[80px] text-center font-bold text-blue-700 bg-blue-50">Cum Total</TableHead>
+                          <TableHead className="min-w-[80px] text-center font-bold text-blue-700 bg-blue-50">Cum Avg</TableHead>
+                        </>
+                      )}
+                      {/* Position is LAST */}
+                      <TableHead className="min-w-[60px] text-center font-bold">Position</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.map((row, idx) => (
                       <TableRow key={row.fullname}>
-                        <TableCell className="sticky left-0 bg-background font-medium text-center">
+                        <TableCell className="sticky left-0 bg-background font-medium">
                           {idx + 1}
                         </TableCell>
                         <TableCell className="sticky left-10 bg-background font-medium whitespace-nowrap">
@@ -542,13 +629,10 @@ export default function BroadsheetView() {
                         {subjects.map((subj) => {
                           const score = row.subjects[subj] || 0;
                           return (
-                            <TableCell key={subj} className="text-center p-1">
+                            <TableCell key={subj} className="text-center">
                               <span
                                 className="inline-flex h-8 w-12 items-center justify-center rounded text-sm font-medium"
-                                style={{
-                                  background: getCellBg(score),
-                                  color: getCellColor(score),
-                                }}
+                                style={score >= 50 ? { background: "#dcfce7", color: "#166534" } : score >= 40 ? { background: "#fef9c3", color: "#854d0e" } : { background: "#fee2e2", color: "#991b1b" }}
                               >
                                 {score}
                               </span>
@@ -557,6 +641,22 @@ export default function BroadsheetView() {
                         })}
                         <TableCell className="text-center font-bold">{row.total}</TableCell>
                         <TableCell className="text-center font-semibold">{row.average}</TableCell>
+                        {row.prevTermTotals.map((pt, i) => (
+                          <TableCell key={i} className="text-center font-bold text-orange-700 bg-orange-50/50">
+                            {pt}
+                          </TableCell>
+                        ))}
+                        {hasCumulative && (
+                          <>
+                            <TableCell className="text-center font-bold text-blue-700 bg-blue-50/50">
+                              {row.cumTotal}
+                            </TableCell>
+                            <TableCell className="text-center font-bold text-blue-700 bg-blue-50/50">
+                              {row.cumAvg}
+                            </TableCell>
+                          </>
+                        )}
+                        {/* Position is LAST */}
                         <TableCell className="text-center">
                           <span
                             className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold"
@@ -567,8 +667,10 @@ export default function BroadsheetView() {
                         </TableCell>
                       </TableRow>
                     ))}
+
+                    {/* Summary row — Position is LAST */}
                     <TableRow className="bg-muted/50 font-bold">
-                      <TableCell className="sticky left-0 bg-muted/50 text-center" colSpan={2}>Class Average</TableCell>
+                      <TableCell className="sticky left-0 bg-muted/50" colSpan={2}>Class Average</TableCell>
                       {subjects.map((subj) => {
                         const avg = rows.length > 0
                           ? (rows.reduce((s, r) => s + (r.subjects[subj] || 0), 0) / rows.length).toFixed(1)
@@ -578,13 +680,30 @@ export default function BroadsheetView() {
                         );
                       })}
                       <TableCell className="text-center">
-                        {rows.reduce((s, r) => s + r.total, 0)}
+                        {rows.reduce((s, r) => s + r.total, 0).toFixed(0)}
                       </TableCell>
                       <TableCell className="text-center text-sm">
                         {rows.length > 0
                           ? (rows.reduce((s, r) => s + r.average, 0) / rows.length).toFixed(1)
                           : "0"}
                       </TableCell>
+                      {prevTermLabels.map((_, i) => (
+                        <TableCell key={i} className="text-center font-bold bg-orange-50/50">
+                          {rows.reduce((s, r) => s + (r.prevTermTotals[i] || 0), 0).toFixed(0)}
+                        </TableCell>
+                      ))}
+                      {hasCumulative && (
+                        <>
+                          <TableCell className="text-center font-bold bg-blue-50/50">
+                            {rows.reduce((s, r) => s + r.cumTotal, 0).toFixed(0)}
+                          </TableCell>
+                          <TableCell className="text-center font-bold bg-blue-50/50">
+                            {rows.length > 0
+                              ? (rows.reduce((s, r) => s + r.cumAvg, 0) / rows.length).toFixed(1)
+                              : "0"}
+                          </TableCell>
+                        </>
+                      )}
                       <TableCell />
                     </TableRow>
                   </TableBody>

@@ -1155,90 +1155,142 @@ export default function ExamView() {
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {/* Teacher Remark - Dropdown */}
-                  <div className="space-y-1.5">
-                    <Label>Teacher Remark</Label>
-                    <Select value={commentTeacher} onValueChange={setCommentTeacher}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select remark..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {teacherRemarkOptions.length === 0 && (
-                          <SelectItem value="__none" disabled>
-                            No remarks added yet
-                          </SelectItem>
-                        )}
-                        {teacherRemarkOptions.map((r, i) => (
-                          <SelectItem key={i} value={r}>
-                            {r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-muted-foreground">
-                      Add remarks in Report Card Settings
-                    </p>
-                  </div>
+                <>
+                  {/* Student Performance Summary — guides teacher/principal comment */}
+                  {formStudent && (() => {
+                    const ss = examScores.filter((s) => s.fullname === formStudent);
+                    const taken = ss.length;
+                    const total = ss.reduce((a, s) => a + (s.total || 0), 0);
+                    const avg = taken > 0 ? total / taken : 0;
+                    const passed = ss.filter((s) => (s.total || 0) >= 40).length;
+                    const failed = taken - passed;
+                    const hi = ss.length > 0 ? Math.max(...ss.map(s => s.total || 0)) : 0;
+                    const lo = ss.length > 0 ? Math.min(...ss.map(s => s.total || 0)) : 0;
+                    return (
+                      <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg border bg-muted/30 p-3 sm:grid-cols-4 lg:grid-cols-7">
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Student</div>
+                          <div className="truncate text-sm font-semibold">{formStudent}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Subjects</div>
+                          <div className="text-lg font-bold">{taken}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Total</div>
+                          <div className="text-lg font-bold">{total}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Average</div>
+                          <div className={`text-lg font-bold ${avg >= 50 ? "text-emerald-600" : avg >= 40 ? "text-amber-600" : "text-red-600"}`}>
+                            {avg.toFixed(1)}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Passed</div>
+                          <div className="text-lg font-bold text-emerald-600">{passed}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Failed</div>
+                          <div className={`text-lg font-bold ${failed > 0 ? "text-red-600" : "text-emerald-600"}`}>{failed}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[11px] text-muted-foreground">Best / Worst</div>
+                          <div className="text-sm font-semibold">
+                            <span className="text-emerald-600">{hi}</span>
+                            {" / "}
+                            <span className="text-red-600">{lo}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  {/* Principal Comment - Dropdown */}
-                  <div className="space-y-1.5">
-                    <Label>Principal Comment</Label>
-                    <Select value={commentPrincipal} onValueChange={setCommentPrincipal}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select comment..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {principalRemarkOptions.length === 0 && (
-                          <SelectItem value="__none" disabled>
-                            No comments added yet
-                          </SelectItem>
-                        )}
-                        {principalRemarkOptions.map((r, i) => (
-                          <SelectItem key={i} value={r}>
-                            {r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-muted-foreground">
-                      Add comments in Report Card Settings
-                    </p>
-                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {/* Teacher Remark - Dropdown */}
+                    <div className="space-y-1.5">
+                      <Label>Teacher Remark</Label>
+                      <Select value={commentTeacher} onValueChange={setCommentTeacher}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select remark..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {teacherRemarkOptions.length === 0 && (
+                            <SelectItem value="__none" disabled>
+                              No remarks added yet
+                            </SelectItem>
+                          )}
+                          {teacherRemarkOptions.map((r, i) => (
+                            <SelectItem key={i} value={r}>
+                              {r}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Add remarks in Report Card Settings
+                      </p>
+                    </div>
 
-                  {/* School Days Opened */}
-                  <div className="space-y-1.5">
-                    <Label>School Days Opened</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={commentDaysOpened}
-                      onChange={(e) => setCommentDaysOpened(e.target.value)}
-                      placeholder="e.g. 95"
-                    />
-                  </div>
+                    {/* Principal Comment - Dropdown */}
+                    <div className="space-y-1.5">
+                      <Label>Principal Comment</Label>
+                      <Select value={commentPrincipal} onValueChange={setCommentPrincipal}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select comment..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {principalRemarkOptions.length === 0 && (
+                            <SelectItem value="__none" disabled>
+                              No comments added yet
+                            </SelectItem>
+                          )}
+                          {principalRemarkOptions.map((r, i) => (
+                            <SelectItem key={i} value={r}>
+                              {r}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Add comments in Report Card Settings
+                      </p>
+                    </div>
 
-                  {/* Next Term Label */}
-                  <div className="space-y-1.5">
-                    <Label>Next Term</Label>
-                    <Input
-                      type="text"
-                      value={commentNextTerm}
-                      onChange={(e) => setCommentNextTerm(e.target.value)}
-                      placeholder="e.g. Second Term 2025/2026"
-                    />
-                  </div>
+                    {/* School Days Opened */}
+                    <div className="space-y-1.5">
+                      <Label>School Days Opened</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={commentDaysOpened}
+                        onChange={(e) => setCommentDaysOpened(e.target.value)}
+                        placeholder="e.g. 95"
+                      />
+                    </div>
 
-                  {/* Next Term Resumption */}
-                  <div className="space-y-1.5">
-                    <Label>Next Term Begins</Label>
-                    <Input
-                      type="date"
-                      value={commentResumption}
-                      onChange={(e) => setCommentResumption(e.target.value)}
-                    />
+                    {/* Next Term Label */}
+                    <div className="space-y-1.5">
+                      <Label>Next Term</Label>
+                      <Input
+                        type="text"
+                        value={commentNextTerm}
+                        onChange={(e) => setCommentNextTerm(e.target.value)}
+                        placeholder="e.g. Second Term 2025/2026"
+                      />
+                    </div>
+
+                    {/* Next Term Resumption */}
+                    <div className="space-y-1.5">
+                      <Label>Next Term Begins</Label>
+                      <Input
+                        type="date"
+                        value={commentResumption}
+                        onChange={(e) => setCommentResumption(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </CardContent>
           </Card>
