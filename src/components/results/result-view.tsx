@@ -563,6 +563,12 @@ function buildPrintHTML(
       font-weight: 600;
       font-size: 7.5pt !important;
     }
+    td.cum-total-cell {
+      background-color: #d1fae5 !important;
+      color: #065f46 !important;
+      font-weight: 700 !important;
+      font-size: 7.5pt !important;
+    }
     th[style*="text-align: left"] { text-align: left !important; }
     td[style*="text-align: left"]  { text-align: left !important; }
     img { max-width: 55px !important; max-height: 55px !important; }
@@ -777,7 +783,7 @@ export default function ResultView() {
           return caTotal > 0 || examVal > 0;
         });
 
-                // Hide subjects where both CA and Exam are 0
+        // Hide subjects where both CA and Exam are 0
         const filtered = scores.filter((s: any) => {
           const caTotal = (Number(s.firstCa) || 0) + (Number(s.secondCa) || 0) + (Number(s.thirdCa) || 0);
           const examVal = Number(s.exam) || 0;
@@ -1293,6 +1299,7 @@ export default function ResultView() {
                     </div>
                   )}
 
+
                   {/* ======== SUBJECT TABLE ======== */}
                   {visibility.subjectTable && (
                     <div style={RC.tableWrapper}>
@@ -1321,6 +1328,10 @@ export default function ResultView() {
                                 {/* Current term actual */}
                                 <th className="cum-header" style={RC.thCum}>
                                   Actual
+                                </th>
+                                {/* Cumulative Total (raw sum before division) */}
+                                <th className="cum-header" style={RC.thCum}>
+                                  Cum Total
                                 </th>
                                 {/* Cumulative Average */}
                                 <th className="cum-header" style={RC.thCum}>
@@ -1385,6 +1396,14 @@ export default function ResultView() {
                                     <td className="cum-cell" style={{ ...cumStyle, fontWeight: 800 }}>
                                       {sc.total}
                                     </td>
+                                    {/* Cumulative Total (raw sum before division) */}
+                                    <td className="cum-cell cum-total-cell" style={{ ...cumStyle, fontWeight: 800, color: "#065f46" }}>
+                                      {stuCum && stuCum.cumulativeTotal > 0 ? (
+                                        fmt(stuCum.cumulativeTotal)
+                                      ) : (
+                                        <span style={{ color: "#aaa" }}>—</span>
+                                      )}
+                                    </td>
                                     {/* Cumulative Average */}
                                     <td className="cum-cell" style={cumStyle}>
                                       {stuCum && stuCum.cumulativeAvg > 0 ? (
@@ -1441,6 +1460,10 @@ export default function ResultView() {
                                 {/* Current term total */}
                                 <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 800 }}>
                                   {fmt(studentTotalFromScores)}
+                                </td>
+                                {/* Cumulative Total (grand raw sum) */}
+                                <td className="cum-cell" style={{ ...RC.totalRow, background: "#d1fae5", color: "#065f46", fontWeight: 800 }}>
+                                  {isCumulative ? fmt(cumGrandTotal) : "—"}
                                 </td>
                                 {/* Cumulative Average total */}
                                 <td className="cum-cell" style={{ ...RC.totalRow, background: "#dbeafe", color: "#1e40af", fontWeight: 700 }}>
