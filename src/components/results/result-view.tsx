@@ -563,15 +563,10 @@ function buildPrintHTML(
       font-weight: 600;
       font-size: 7.5pt !important;
     }
-    td.cum-total-cell {
-      background-color: #d1fae5 !important;
-      color: #065f46 !important;
-      font-weight: 700 !important;
-      font-size: 7.5pt !important;
-    }
     th[style*="text-align: left"] { text-align: left !important; }
     td[style*="text-align: left"]  { text-align: left !important; }
-    img { max-width: 55px !important; max-height: 55px !important; }
+    /* Only restrict non-watermark images (passport, logos in header) */
+    img:not(.wm-img) { max-width: 55px !important; max-height: 55px !important; }
     svg { width: 9px; height: 9px; display: inline-block; vertical-align: middle; }
     div, span, td, th {
       -webkit-print-color-adjust: exact !important;
@@ -587,34 +582,59 @@ function buildPrintHTML(
       border-radius: 4px;
       margin-top: 6px;
     }
-      .watermark-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-  overflow: hidden;
-}
-.watermark-overlay img {
-  position: absolute;
-  width: 120px;
-  height: 120px;
-  opacity: 0.04;
-  object-fit: contain;
-  transform: rotate(-30deg);
-}
-.watermark-overlay .wm-1 { top: 15%; left: 10%; }
-.watermark-overlay .wm-2 { top: 15%; right: 10%; }
-.watermark-overlay .wm-3 { top: 50%; left: 25%; }
-.watermark-overlay .wm-4 { top: 50%; right: 25%; }
-.watermark-overlay .wm-5 { bottom: 15%; left: 15%; }
-.watermark-overlay .wm-6 { bottom: 15%; right: 15%; }
+    /* ===== WATERMARK: tiled across the page ===== */
+    .watermark-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+      overflow: hidden;
+    }
+    .watermark-overlay img {
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      opacity: 0.06;
+      object-fit: contain;
+      transform: rotate(-30deg);
+    }
+    .watermark-overlay .wm-1 { top: 10%; left: 8%; }
+    .watermark-overlay .wm-2 { top: 10%; right: 8%; }
+    .watermark-overlay .wm-3 { top: 38%; left: 20%; }
+    .watermark-overlay .wm-4 { top: 38%; right: 20%; }
+    .watermark-overlay .wm-5 { top: 65%; left: 12%; }
+    .watermark-overlay .wm-6 { top: 65%; right: 12%; }
+    .watermark-overlay .wm-7 { top: 88%; left: 30%; }
+    .watermark-overlay .wm-8 { top: 88%; right: 30%; }
+    /* Hide screen watermark in print window */
+    [data-watermark-screen] { display: none !important; }
   </style>
 </head>
 <body>
  ${content}
+  <script>
+    // Auto-scale report card to fill A4 page
+    (function() {
+      var card = document.querySelector('[data-report-card]');
+      if (!card) return;
+      setTimeout(function() {
+        var pageW = document.documentElement.clientWidth || 794;
+        var pageH = document.documentElement.clientHeight || 1123;
+        var cardW = card.scrollWidth;
+        var cardH = card.scrollHeight;
+        var scaleX = pageW / cardW;
+        var scaleY = pageH / cardH;
+        var scale = Math.min(scaleX, scaleY, 1.35);
+        if (scale > 1.01) {
+          card.style.transformOrigin = 'top left';
+          card.style.transform = 'scale(' + scale + ')';
+          card.style.width = (cardW * scale) + 'px';
+          card.style.height = (cardH * scale) + 'px';
+        }
+      }, 300);
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -723,6 +743,7 @@ export default function ResultView() {
         let studentsWithScores = new Set<string>();
         if (scoreRes.ok) {
           const scores = await scoreRes.json();
+          const currentTermFiltered = scores;
           // Case-insensitive: store normalized fullnames
           studentsWithScores = new Set(
             (scores as any[]).map((s: any) => (s.fullname || "").trim().toUpperCase().replace(/\s+/g, " "))
@@ -767,33 +788,34 @@ export default function ResultView() {
         fetch("/api/settings?type=teacher-remarks"), fetch("/api/settings?type=principal-remarks"),
         fetch("/api/settings?type=signatures"), fetch("/api/settings?type=resumptions"),
       ]);
+
+      /* Current term scores - saved to local var for reuse in cumulative calc */
+      let currentTermFiltered: ExamScoreDetail[] = [];
       if (scoreRes.ok) {
-        const scores: ExamScoreDetail[] = await scoreRes.json();
+        const scores = await scoreRes.json();
         if (!scores || scores.length === 0) {
           toast.error("No scores found for this student. Scores must be entered first.");
           setReportLoading(false);
           setReportOpen(false);
           return;
         }
-
-        // Step 1: Hide subjects where both CA and Exam are 0
-        const noZeroScores = scores.filter((s: any) => {
-          const caTotal = (Number(s.firstCa) || 0) + (Number(s.secondCa) || 0) + (Number(s.thirdCa) || 0);
+        /* Hide subjects where both CA and Exam are 0 */
+        const filtered = (scores || []).filter((s: any) => {
+          const caTotal = (s.firstCa || 0) + (s.secondCa || 0) + (s.thirdCa || 0);
           const examVal = Number(s.exam) || 0;
           return caTotal > 0 || examVal > 0;
         });
-
-        // Hide subjects where both CA and Exam are 0
-        const filtered = scores.filter((s: any) => {
-          const caTotal = (Number(s.firstCa) || 0) + (Number(s.secondCa) || 0) + (Number(s.thirdCa) || 0);
-          const examVal = Number(s.exam) || 0;
-          return caTotal > 0 || examVal > 0;
-        });
+        currentTermFiltered = filtered as ExamScoreDetail[];
         setReportScores(filtered);
       } else {
         setReportScores([]);
       }
-      if (studentRes.ok) { const students = await studentRes.json(); setStudentData(students.find((s: StudentData) => s.fullname.toLowerCase() === record.fullname.toLowerCase()) || null); }
+
+      if (studentRes.ok) {
+        const students = await studentRes.json();
+        setStudentData(students.find((s: StudentData) => s.fullname.toLowerCase() === record.fullname.toLowerCase()) || null);
+      }
+
       if (teacherRemarkRes.ok) {
         const remarks = await teacherRemarkRes.json();
         const studentName = (record.fullname || "").toLowerCase();
@@ -807,6 +829,7 @@ export default function ResultView() {
         });
         setTeacherRemark(found?.remark || "");
       }
+
       if (principalRemarkRes.ok) {
         const remarks = await principalRemarkRes.json();
         const studentName = (record.fullname || "").toLowerCase();
@@ -820,36 +843,203 @@ export default function ResultView() {
         });
         setPrincipalRemark(found?.remark || "");
       }
-      if (signaturesRes.ok) { const sigs = await signaturesRes.json(); if (sigs.teacherSignature) setTeacherSignature(sigs.teacherSignature); if (sigs.principalSignature) setPrincipalSignature(sigs.principalSignature); }
+
+      if (signaturesRes.ok) {
+        const sigs = await signaturesRes.json();
+        if (sigs.teacherSignature) setTeacherSignature(sigs.teacherSignature);
+        if (sigs.principalSignature) setPrincipalSignature(sigs.principalSignature);
+      }
+
       if (resumptionRes.ok) {
         const resumptions = await resumptionRes.json();
         const m = resumptions.find((r: any) => r.session === selectedSession && r.term === selectedTerm);
         if (m) setResumptionInfo({ openTerm: m.openTerm, nextTerm: m.nextTermLabel || m.nextTerm, noSchoolOpen: m.noSchoolOpen });
       }
 
-      /* ===== CUMULATIVE: Fetch smart cumulative data (Option E) ===== */
+      /* ===== CUMULATIVE: Direct fetch per previous term (reliable) ===== */
       const termNum = selectedTerm === "First Term" ? 1 : selectedTerm === "Second Term" ? 2 : 3;
       if (termNum >= 2) {
         try {
-          const cumRes = await fetch(
-            `/api/exams/cumulative?session=${encodeURIComponent(selectedSession)}&classId=${selectedClass}&term=${termNum}`
-          );
-          const cumJson: CumulativeApiResponse = await cumRes.json();
-          if (cumJson.success && cumJson.data) {
-            const dataMap: Record<string, SubjectCumulativeData> = {};
-            for (const subj of cumJson.data.subjects) {
-              dataMap[subj.subjectId] = subj;
-            }
-            setCumulativeData(dataMap);
-            setCumulativeInfo({
-              currentTerm: cumJson.data.currentTerm,
-              maxAvailableTerms: cumJson.data.maxAvailableTerms,
-              requestedTerms: cumJson.data.requestedTerms,
-              missingTerms: cumJson.data.missingTerms,
-            });
+          const prevTermNames: Record<number, string> = { 1: "First Term", 2: "Second Term" };
+          const prevScoresMap: Record<number, ExamScoreDetail[]> = {};
+
+          // Fetch each previous term's scores directly for this student
+          const prevFetches: Promise<void>[] = [];
+          for (let t = 1; t < termNum; t++) {
+            const tNum = t;
+            prevFetches.push(
+              (async () => {
+                try {
+                  const p = new URLSearchParams({
+                    session: selectedSession,
+                    class: selectedClass,
+                    term: prevTermNames[tNum],
+                    fullname: record.fullname,
+                  });
+                  const r = await fetch(`/api/exams?${p}`);
+                  if (r.ok) {
+                    prevScoresMap[tNum] = await r.json();
+                  }
+                } catch { /* individual term fetch failed, skip */ }
+              })()
+            );
           }
-        } catch {
-          console.warn("Failed to fetch cumulative data");
+          await Promise.all(prevFetches);
+
+          // Also fetch ALL class scores for each term (for ranking)
+          const classScoresMap: Record<number, ExamScoreDetail[]> = {};
+          const classFetches: Promise<void>[] = [];
+          for (let t = 1; t <= termNum; t++) {
+            const tNum = t;
+            classFetches.push(
+              (async () => {
+                try {
+                  const p = new URLSearchParams({
+                    session: selectedSession,
+                    class: selectedClass,
+                    term: tNum === 1 ? "First Term" : tNum === 2 ? "Second Term" : "Third Term",
+                  });
+                  const r = await fetch(`/api/exams?${p}`);
+                  if (r.ok) {
+                    classScoresMap[tNum] = await r.json();
+                  }
+                } catch { /* skip */ }
+              })()
+            );
+          }
+          await Promise.all(classFetches);
+
+          // Use the current term scores saved earlier (before response body was consumed)
+          const currentScores = currentTermFiltered;
+
+          // Build cumulative data structure (same shape as before, so rendering code works unchanged)
+          const dataMap: Record<string, SubjectCumulativeData> = {};
+          const availableTermsSet = new Set<number>();
+          const allSubjects = new Set<string>();
+
+          // Collect all subjects across all terms for this student
+          for (let t = 1; t <= termNum; t++) {
+            const termScores = t < termNum ? (prevScoresMap[t] || []) : currentScores;
+            for (const sc of termScores) {
+              allSubjects.add(sc.subject);
+              if (sc.total > 0) availableTermsSet.add(t);
+            }
+          }
+
+          // Track missing terms
+          const missingTerms: number[] = [];
+          for (let t = 1; t < termNum; t++) {
+            if (!availableTermsSet.has(t)) missingTerms.push(t);
+          }
+          const maxAvailableTerms = availableTermsSet.size || 1;
+
+          // Build per-subject cumulative data for this student + class ranks
+          for (const subjectName of allSubjects) {
+            const stuTermScores: Record<number, TermScoreInfo> = {};
+            let cumTotal = 0;
+            let termsWithData = 0;
+
+            for (let t = 1; t <= termNum; t++) {
+              const termScores = t < termNum ? (prevScoresMap[t] || []) : currentScores;
+              const sc = termScores.find(
+                (s) => s.subject.toLowerCase() === subjectName.toLowerCase()
+              );
+              if (sc && sc.total > 0) {
+                const hasCA = (sc.firstCa > 0 || sc.secondCa > 0 || sc.thirdCa > 0);
+                const isAbsent = (sc.exam === 0 || sc.exam == null) && hasCA;
+                stuTermScores[t] = {
+                  score: sc.total,
+                  source: isAbsent ? "absent" : "exam",
+                };
+                if (!isAbsent) {
+                  cumTotal += sc.total;
+                  termsWithData++;
+                }
+              }
+            }
+
+            const cumAvg = termsWithData > 0
+              ? parseFloat((cumTotal / termsWithData).toFixed(1))
+              : 0;
+
+            // Build full students list for this subject (for ranking)
+            const allClassStudents: StudentCumulativeInfo[] = [];
+            const classAllTermScores: Record<number, ExamScoreDetail[]> = {};
+            for (let t = 1; t <= termNum; t++) {
+              classAllTermScores[t] = classScoresMap[t] || [];
+            }
+
+            // Get unique students who have this subject across any term
+            const studentNames = new Set<string>();
+            for (let t = 1; t <= termNum; t++) {
+              for (const s of classAllTermScores[t]) {
+                if (s.subject.toLowerCase() === subjectName.toLowerCase() && s.total > 0) {
+                  studentNames.add(s.fullname);
+                }
+              }
+            }
+
+            for (const stuName of studentNames) {
+              const sTermScores: Record<number, TermScoreInfo> = {};
+              let sCumTotal = 0;
+              let sTermsData = 0;
+
+              for (let t = 1; t <= termNum; t++) {
+                const sc = classAllTermScores[t].find(
+                  (s) => s.fullname.toLowerCase() === stuName.toLowerCase() && s.subject.toLowerCase() === subjectName.toLowerCase()
+                );
+                if (sc && sc.total > 0) {
+                  const hasCA = (sc.firstCa > 0 || sc.secondCa > 0 || sc.thirdCa > 0);
+                  const isAbsent = (sc.exam === 0 || sc.exam == null) && hasCA;
+                  sTermScores[t] = { score: sc.total, source: isAbsent ? "absent" : "exam" };
+                  if (!isAbsent) { sCumTotal += sc.total; sTermsData++; }
+                }
+              }
+
+              const sCumAvg = sTermsData > 0
+                ? parseFloat((sCumTotal / sTermsData).toFixed(1))
+                : 0;
+
+              allClassStudents.push({
+                studentId: stuName,
+                studentName: stuName,
+                regNumber: "",
+                termScores: sTermScores,
+                availableTermsCount: sTermsData,
+                cumulativeTotal: parseFloat(sCumTotal.toFixed(1)),
+                cumulativeAvg: sCumAvg,
+                rank: 0,
+              });
+            }
+
+            // Sort and rank
+            allClassStudents.sort((a, b) => b.cumulativeAvg - a.cumulativeAvg);
+            for (let i = 0; i < allClassStudents.length; i++) {
+              if (i === 0) {
+                allClassStudents[i].rank = 1;
+              } else if (allClassStudents[i].cumulativeAvg < allClassStudents[i - 1].cumulativeAvg) {
+                allClassStudents[i].rank = i + 1;
+              } else {
+                allClassStudents[i].rank = allClassStudents[i - 1].rank;
+              }
+            }
+
+            dataMap[subjectName] = {
+              subjectId: subjectName,
+              students: allClassStudents,
+            };
+          }
+
+          setCumulativeData(dataMap);
+          setCumulativeInfo({
+            currentTerm: termNum,
+            maxAvailableTerms,
+            requestedTerms: termNum,
+            missingTerms,
+          });
+        } catch (err) {
+          console.warn("[ReportCard] Direct cumulative fetch failed:", err);
+          toast.warning("Some previous term scores could not be loaded. Check your network and reopen the report card.");
         }
       } else {
         setCumulativeData({});
@@ -857,7 +1047,6 @@ export default function ResultView() {
       }
 
       /* ===== FALLBACK: Compute subject ranks from ALL class scores ===== */
-      /* This ensures rank shows even for First Term (where cumulative API is skipped) */
       try {
         const allScoresParams = new URLSearchParams({
           session: selectedSession,
@@ -902,7 +1091,19 @@ export default function ResultView() {
   function handlePrint() {
     const printArea = document.getElementById("report-card-print-area");
     if (!printArea) return;
-    const htmlContent = printArea.innerHTML;
+
+    // Clone the print area so we can modify it for print without affecting the screen view
+    const cloned = printArea.cloneNode(true) as HTMLElement;
+
+    // 1) Hide the screen-only watermark (single centered image)
+    const screenWm = cloned.querySelector('[data-watermark-screen]');
+    if (screenWm) (screenWm as HTMLElement).style.display = 'none';
+
+    // 2) Show the print watermark overlay (8 tiled images across the page)
+    const printWm = cloned.querySelector('.watermark-overlay');
+    if (printWm) (printWm as HTMLElement).style.display = 'block';
+
+    const htmlContent = cloned.innerHTML;
     const studentName = reportStudent?.fullname || "Student";
     const printWindow = window.open("", "_blank", "width=800,height=1000");
     if (!printWindow) { toast.error("Please allow pop-ups to print the report card"); return; }
@@ -913,16 +1114,16 @@ export default function ResultView() {
     const images = printWindow.document.querySelectorAll("img");
     let imagesLoaded = 0;
     let printCalled = false;
+    // Wait extra time for the auto-scale script + watermark images to finish
     const tryPrint = () => { if (printCalled) return; printCalled = true; printWindow.print(); };
-    const checkAllLoaded = () => { imagesLoaded++; if (imagesLoaded >= images.length) setTimeout(tryPrint, 300); };
-    if (images.length === 0) { setTimeout(tryPrint, 300); }
+    const checkAllLoaded = () => { imagesLoaded++; if (imagesLoaded >= images.length) setTimeout(tryPrint, 600); };
+    if (images.length === 0) { setTimeout(tryPrint, 600); }
     else {
       images.forEach((img) => { if ((img as HTMLImageElement).complete) checkAllLoaded(); else { img.addEventListener("load", checkAllLoaded); img.addEventListener("error", checkAllLoaded); } });
-      setTimeout(() => { if (!printCalled) tryPrint(); }, 4000);
+      setTimeout(() => { if (!printCalled) tryPrint(); }, 5000);
     }
     printWindow.addEventListener("afterprint", () => printWindow.close());
   }
-
   /* ================================================================ */
   /*  Derived                                                          */
   /* ================================================================ */
@@ -1219,8 +1420,10 @@ export default function ResultView() {
 
           <div id="report-card-print-area" ref={printAreaRef} style={{ fontFamily: "'Segoe UI', Arial, sans-serif", color: "#000", background: "#fff", position: "relative" }}>
 
+            {/* ===== SCREEN WATERMARK (hidden on print, replaced by tiled print watermark) ===== */}
             {tenant?.logo && (
               <div
+                data-watermark-screen
                 style={{
                   position: "absolute",
                   top: "50%",
@@ -1233,6 +1436,7 @@ export default function ResultView() {
                 <img
                   src={tenant.logo}
                   alt=""
+                  className="wm-img"
                   style={{
                     width: 200,
                     height: 200,
@@ -1243,10 +1447,19 @@ export default function ResultView() {
               </div>
             )}
 
+            {/* ===== PRINT WATERMARK (hidden on screen, tiled across page on print) ===== */}
+            {tenant?.logo && (
+              <div className="watermark-overlay" style={{ display: "none" }}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <img key={n} src={tenant.logo} alt="" className={`wm-img wm-${n}`} />
+                ))}
+              </div>
+            )}
+
             {reportLoading ? (
               <div className="flex items-center justify-center py-16"><Loader2Icon className="h-7 w-7 animate-spin text-muted-foreground" /></div>
             ) : reportStudent ? (
-              <div style={RC.card}>
+              <div data-report-card style={RC.card}>
 
                 {/* ======== HEADER ======== */}
                 {visibility.header && (
