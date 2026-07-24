@@ -738,20 +738,37 @@ export default function ResultView() {
       const recRes = await fetch(`/api/results?${params}`);
       if (recRes.ok) {
         const allRecs = await recRes.json();
+
+        // Fetch current active students for this class AND all students (no class filter)
+        // so we catch students who may have been deleted entirely
+        const [studentsInClassRes, allStudentsRes] = await Promise.all([
+          fetch(`/api/students?class=${encodeURIComponent(selectedClass)}`),
+          fetch(`/api/students`),
+        ]);
+        const activeStudentNames = new Set<string>();
+        if (studentsInClassRes.ok) {
+          const classStudents = await studentsInClassRes.json();
+          for (const s of classStudents) {
+            if (s.fullname) activeStudentNames.add((s.fullname || "").toLowerCase());
+          }
+        }
+        if (allStudentsRes.ok) {
+          const allStudents = await allStudentsRes.json();
+          for (const s of allStudents) {
+            if (s.fullname) activeStudentNames.add((s.fullname || "").toLowerCase());
+          }
+        }
+
         // Also fetch actual exam scores to filter students who have no scores
         const scoreRes = await fetch(`/api/exams?${params}`);
         let studentsWithScores = new Set<string>();
         if (scoreRes.ok) {
           const scores = await scoreRes.json();
-          const currentTermFiltered = scores;
-          // Case-insensitive: store normalized fullnames
-          studentsWithScores = new Set(
-            (scores as any[]).map((s: any) => (s.fullname || "").trim().toUpperCase().replace(/\s+/g, " "))
-          );
+          studentsWithScores = new Set(scores.map((s: any) => s.fullname));
         }
-        // Only show students who actually have exam scores (case-insensitive match)
+        // Only show students who actually have exam scores AND are still in the student list
         const filteredRecs = allRecs.filter((r: any) =>
-          studentsWithScores.has((r.fullname || "").trim().toUpperCase().replace(/\s+/g, " "))
+          studentsWithScores.has(r.fullname) && activeStudentNames.has((r.fullname || "").toLowerCase())
         );
         setRecords(filteredRecs);
       }
@@ -761,7 +778,24 @@ export default function ResultView() {
         const allRes = await fetch(`/api/results?${new URLSearchParams({ session: selectedSession, term: selectedTerm })}`);
         if (allRes.ok) {
           const allRecs: StudentRecord[] = await allRes.json();
-          setOverallTotalStudents(new Set(allRecs.filter((r) => extractClassBase(r.class) === classBase).map((r) => r.fullname)).size);
+
+          // Also filter overall results by active students
+          const allStudentsRes2 = await fetch(`/api/students`);
+          const activeNames = new Set<string>();
+          if (allStudentsRes2.ok) {
+            const allStudents = await allStudentsRes2.json();
+            for (const s of allStudents) {
+              if (s.fullname) activeNames.add((s.fullname || "").toLowerCase());
+            }
+          }
+
+          setOverallTotalStudents(
+            new Set(
+              allRecs
+                .filter((r) => extractClassBase(r.class) === classBase && activeNames.has((r.fullname || "").toLowerCase()))
+                .map((r) => r.fullname)
+            ).size
+          );
         }
       }
     } catch { toast.error("Network error"); }
