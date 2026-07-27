@@ -247,6 +247,10 @@ function mapCaScores(score: { firstCa: number; secondCa: number; thirdCa: number
   return allCa.slice(0, caCount);
 }
 
+function normalizeName(name: string): string {
+  return (name || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 function getInitials(name: string): string {
   return name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 }
@@ -811,6 +815,8 @@ export default function ResultView() {
   /* ================================================================ */
 
   async function openReportCard(record: StudentRecord) {
+    // Force fullname to uppercase so it matches the Student table (which stores names in ALL CAPS)
+    record = { ...record, fullname: (record.fullname || "").toUpperCase() };
     setReportStudent(record); setReportOpen(true); setReportLoading(true);
     setStudentData(null); setTeacherRemark(""); setPrincipalRemark("");
     setTeacherSignature(null); setPrincipalSignature(null); setResumptionInfo(null);
@@ -847,7 +853,55 @@ export default function ResultView() {
 
       if (studentRes.ok) {
         const students = await studentRes.json();
-        setStudentData(students.find((s: StudentData) => s.fullname.toLowerCase() === record.fullname.toLowerCase()) || null);
+        let matched = students.find((s: StudentData) =>
+          normalizeName(s.fullname) === normalizeName(record.fullname)
+        ) || null;
+
+        // If student found but has no image, try fallback to User table (portal uploads go there)
+        if (matched && !matched.imageUrl) {
+          try {
+            const userRes = await fetch(`/api/users`);
+            if (userRes.ok) {
+              const users = await userRes.json();
+              // Match by studentId first (most reliable), then by username, then by email/regNo
+              const matchedUser = users.find((u: any) =>
+                u.studentId === matched.id ||
+                ((u.role || "").toLowerCase() === "student" && (u.username || "").toLowerCase().trim() === record.fullname.toLowerCase().trim()) ||
+                ((u.role || "").toLowerCase() === "student" && (u.email || "").toLowerCase().trim() === (matched?.regNo || "").toLowerCase().trim())
+              );
+              if (matchedUser?.imageUrl) {
+                matched = { ...matched, imageUrl: matchedUser.imageUrl };
+              }
+            }
+          } catch { /* silent fallback */ }
+        }
+
+        // If student NOT found in Student table at all, try User table as last resort
+        if (!matched) {
+          try {
+            const userRes = await fetch(`/api/users`);
+            if (userRes.ok) {
+              const users = await userRes.json();
+              const matchedUser = users.find((u: any) =>
+                (u.role || "").toLowerCase() === "student" &&
+                normalizeName(u.username) === normalizeName(record.fullname)
+              );
+              if (matchedUser) {
+                matched = {
+                  id: matchedUser.studentId || "",
+                  regNo: matchedUser.email || "",
+                  fullname: matchedUser.username || record.fullname,
+                  gender: "",
+                  class: record.class || "",
+                  imageUrl: matchedUser.imageUrl || "",
+                  dateOfBirth: "",
+                  department: "",
+                };
+              }
+            }
+          } catch { /* silent fallback */ }
+        }
+        setStudentData(matched);
       }
 
       if (teacherRemarkRes.ok) {
@@ -1532,7 +1586,7 @@ export default function ResultView() {
                       )}
                       {visibility.studentInfo && (
                         <div style={{ ...RC.infoGrid, flex: 1 }}>
-                          <div><span style={RC.infoLabel}>Name:</span> <span style={RC.infoValue}>{reportStudent.fullname}</span></div>
+                          <div><span style={RC.infoLabel}>Name:</span> <span style={RC.infoValue}>{reportStudent.fullname.toUpperCase()}</span></div>
                           <div><span style={RC.infoLabel}>Reg No:</span> <span style={RC.infoValue}>{studentData?.regNo || "N/A"}</span></div>
                           <div><span style={RC.infoLabel}>Gender:</span> <span style={RC.infoValue}>{studentData?.gender || "N/A"}</span></div>
                           {studentData?.department && (

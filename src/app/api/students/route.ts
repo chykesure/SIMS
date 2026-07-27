@@ -217,6 +217,14 @@ export async function PUT(request: Request) {
       },
     });
 
+    // Sync imageUrl to User table so report cards and portal pick it up
+    if (data.imageUrl !== undefined) {
+      await db.user.updateMany({
+        where: { studentId: id, tenantId },
+        data: { imageUrl: data.imageUrl },
+      }).catch(() => { /* silent — user record may not exist */ });
+    }
+
     return NextResponse.json(student);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";

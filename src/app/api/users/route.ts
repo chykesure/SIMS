@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         username: true,
         role: true,
         imageUrl: true,
+        studentId: true,
         createdAt: true,
         updatedAt: true,
         userRoles: {

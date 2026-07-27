@@ -40,7 +40,7 @@ interface ExamScore {
 
 interface BroadsheetRow {
   fullname: string;
-  subjects: Record<string, number>;
+  subjects: Record<string, number | null>;  // null = no score entered
   total: number;
   average: number;
   position: number;
@@ -133,8 +133,27 @@ export default function BroadsheetView() {
         termsToFetch.push(TERM_BY_NUM[t]);
       }
 
-      const allResults = await Promise.all(termsToFetch.map((t) => fetchScores(t)));
-      const currentTermScores: ExamScore[] = allResults[allResults.length - 1];
+      // Fetch all term scores AND active student list in parallel
+      const [allResults, studentsRes] = await Promise.all([
+        Promise.all(termsToFetch.map((t) => fetchScores(t))),
+        fetch("/api/students"),
+      ]);
+
+      // Build set of ACTIVE (non-deleted) student names (case-insensitive)
+      const activeStudentNames = new Set<string>();
+      if (studentsRes.ok) {
+        const allStudents = await studentsRes.json();
+        for (const s of allStudents) {
+          if (!s.deleted && s.fullname) activeStudentNames.add((s.fullname || "").toLowerCase());
+        }
+      }
+
+      // Filter out deleted students from ALL terms
+      const filteredResults: ExamScore[][] = allResults.map((termScores) =>
+        termScores.filter((s) => activeStudentNames.has((s.fullname || "").toLowerCase()))
+      );
+
+      const currentTermScores: ExamScore[] = filteredResults[filteredResults.length - 1];
 
       if (currentTermScores.length === 0) {
         toast.info("No exam scores found for the selected criteria");
@@ -153,7 +172,7 @@ export default function BroadsheetView() {
       for (const name of uniqueStudents) {
         termTotalsMap[name] = [];
         for (let t = 0; t < allResults.length; t++) {
-          const termScores = allResults[t].filter((s) => s.fullname === name);
+          const termScores = filteredResults[t].filter((s) => s.fullname === name);
           let termTotal = 0;
           for (const sc of termScores) {
             termTotal += sc.total;
@@ -164,28 +183,56 @@ export default function BroadsheetView() {
 
       const studentRows: BroadsheetRow[] = uniqueStudents.map((name) => {
         const studentScores = currentTermScores.filter((s) => s.fullname === name);
-        const subjectMap: Record<string, number> = {};
+        const subjectMap: Record<string, number | null> = {};
         let total = 0;
+        let subjectsScored = 0; // count only subjects that have actual score records
         for (const subj of uniqueSubjects) {
           const score = studentScores.find((s) => s.subject === subj);
-          const val = score ? score.total : 0;
-          subjectMap[subj] = val;
-          total += val;
+          if (score) {
+            subjectMap[subj] = score.total;
+            total += score.total;
+            subjectsScored++;
+          } else {
+            subjectMap[subj] = null; // no score entered — show blank
+          }
         }
 
         const allTermTotals = termTotalsMap[name];
         const prevTermTotals = allTermTotals.slice(0, -1);
-
         const cumTotal = allTermTotals.reduce((s, v) => s + v, 0);
-        const cumAvg = currentTermNum > 0
-          ? parseFloat((cumTotal / currentTermNum).toFixed(2))
-          : 0;
+
+        // Per-subject cumulative average — only for subjects student has in CURRENT term
+        // This matches the report card exactly (report card only loops over reportScores)
+        let cumAvg = 0;
+        if (currentTermNum > 0 && subjectsScored > 0) {
+          let subjectCumAvgSum = 0;
+          let subjectWithDataCount = 0;
+          for (const subj of uniqueSubjects) {
+            if (subjectMap[subj] === null) continue; // student doesn't take this subject — skip
+            let scoreSum = 0;
+            let termCount = 0;
+            for (let t = 0; t < filteredResults.length; t++) {
+              const sc = filteredResults[t].find((s) => s.fullname === name && s.subject === subj);
+              if (sc && sc.total > 0) {
+                scoreSum += sc.total;
+                termCount++;
+              }
+            }
+            if (termCount > 0) {
+              subjectCumAvgSum += scoreSum / termCount;
+              subjectWithDataCount++;
+            }
+          }
+          cumAvg = subjectWithDataCount > 0
+            ? parseFloat((subjectCumAvgSum / subjectWithDataCount).toFixed(2))
+            : 0;
+        }
 
         return {
           fullname: name,
           subjects: subjectMap,
           total: parseFloat(total.toFixed(2)),
-          average: uniqueSubjects.length > 0 ? parseFloat((total / uniqueSubjects.length).toFixed(2)) : 0,
+          average: subjectsScored > 0 ? parseFloat((total / subjectsScored).toFixed(2)) : 0,
           position: 0,
           prevTermTotals,
           cumTotal: parseFloat(cumTotal.toFixed(2)),
@@ -193,16 +240,16 @@ export default function BroadsheetView() {
         };
       });
 
-      // Assign positions based on cumulative average (or current term total for 1st term)
+      // Assign positions based on cumulative total (or current term total for 1st term)
       const useCumulative = currentTermNum >= 2;
       const sorted = [...studentRows].sort((a, b) =>
-        useCumulative ? b.cumAvg - a.cumAvg : b.total - a.total
+        useCumulative ? b.cumTotal - a.cumTotal : b.total - a.total
       );
       let pos = 1;
       sorted.forEach((row, idx) => {
         if (idx > 0) {
-          const val = useCumulative ? row.cumAvg : row.total;
-          const prev = useCumulative ? sorted[idx - 1].cumAvg : sorted[idx - 1].total;
+          const val = useCumulative ? row.cumTotal : row.total;
+          const prev = useCumulative ? sorted[idx - 1].cumTotal : sorted[idx - 1].total;
           if (val < prev) pos = idx + 1;
         }
         row.position = pos;
@@ -292,7 +339,8 @@ export default function BroadsheetView() {
         <td style="text-align:center;">${i + 1}</td>
         <td>${row.fullname}</td>`;
       for (const subj of subjects) {
-        html += `<td style="text-align:center;">${row.subjects[subj] || 0}</td>`;
+        const xlsScore = row.subjects[subj];
+        html += `<td style="text-align:center;">${xlsScore !== null && xlsScore !== undefined ? xlsScore : ""}</td>`;
       }
       html += `<td style="text-align:center;font-weight:bold;">${row.total}</td>
         <td style="text-align:center;">${row.average}</td>`;
@@ -383,8 +431,12 @@ export default function BroadsheetView() {
         <td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; ${bgStyle}">${i + 1}</td>
         <td style="padding:3px 6px; border:1px solid #bbb; text-align:left; font-size:8px; font-weight:500; white-space:nowrap; ${bgStyle}">${row.fullname}</td>`;
       for (const subj of subjects) {
-        const score = row.subjects[subj] || 0;
-        bodyHtml += `<td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:600; ${getCellColor(score)}">${score}</td>`;
+        const score = row.subjects[subj];
+        if (score === null || score === undefined) {
+          bodyHtml += `<td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; color:#ccc;">—</td>`;
+        } else {
+          bodyHtml += `<td style="padding:3px 2px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:600; ${getCellColor(score)}">${score}</td>`;
+        }
       }
       bodyHtml += `<td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:9px; font-weight:800; ${bgStyle}">${row.total}</td>
         <td style="padding:3px 3px; border:1px solid #bbb; text-align:center; font-size:8px; font-weight:600; ${bgStyle}">${row.average.toFixed(1)}</td>`;
@@ -405,8 +457,9 @@ export default function BroadsheetView() {
     bodyHtml += `<tr>
       <td colspan="2" style="padding:4px 6px; border:1px solid #333; font-weight:700; font-size:8px; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">CLASS TOTAL / AVERAGE</td>`;
     for (const subj of subjects) {
-      const subjTotal = rows.reduce((s, r) => s + (r.subjects[subj] || 0), 0);
-      const subjAvg = rows.length > 0 ? (subjTotal / rows.length).toFixed(1) : "0";
+      const studentsWithScore = rows.filter((r) => r.subjects[subj] !== null && r.subjects[subj] !== undefined);
+      const subjTotal = studentsWithScore.reduce((s, r) => s + (r.subjects[subj] as number), 0);
+      const subjAvg = studentsWithScore.length > 0 ? (subjTotal / studentsWithScore.length).toFixed(1) : "—";
       bodyHtml += `<td style="padding:3px 2px; border:1px solid #333; text-align:center; font-size:7px; font-weight:700; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">${subjAvg}</td>`;
     }
     bodyHtml += `<td style="padding:4px 3px; border:1px solid #333; text-align:center; font-weight:800; font-size:9px; background:rgba(${pcRgb.r},${pcRgb.g},${pcRgb.b},0.08);">${classTotal}</td>
@@ -432,15 +485,17 @@ export default function BroadsheetView() {
       bodyHtml += `<tr>
         <td colspan="2" style="padding:3px 6px; border:1px solid #bbb; font-size:7px; font-weight:600;">HIGHEST: ${highest.fullname} (${highest.total})</td>`;
       for (const subj of subjects) {
-        const maxScore = Math.max(...rows.map((r) => r.subjects[subj] || 0));
-        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#166534;">${maxScore}</td>`;
+        const scoresForSubj = rows.map((r) => r.subjects[subj]).filter((v): v is number => v !== null && v !== undefined);
+        const maxScore = scoresForSubj.length > 0 ? Math.max(...scoresForSubj) : 0;
+        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#166534;">${maxScore || "—"}</td>`;
       }
       bodyHtml += `<td colspan="${endCols}" style="border:1px solid #bbb;"></td></tr>`;
       bodyHtml += `<tr>
         <td colspan="2" style="padding:3px 6px; border:1px solid #bbb; font-size:7px; font-weight:600;">LOWEST: ${lowest.fullname} (${lowest.total})</td>`;
       for (const subj of subjects) {
-        const minScore = Math.min(...rows.map((r) => r.subjects[subj] || 0));
-        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#991b1b;">${minScore}</td>`;
+        const scoresForSubj = rows.map((r) => r.subjects[subj]).filter((v): v is number => v !== null && v !== undefined);
+        const minScore = scoresForSubj.length > 0 ? Math.min(...scoresForSubj) : 0;
+        bodyHtml += `<td style="padding:2px; border:1px solid #bbb; text-align:center; font-size:7px; font-weight:600; color:#991b1b;">${minScore || "—"}</td>`;
       }
       bodyHtml += `<td colspan="${endCols}" style="border:1px solid #bbb;"></td></tr>`;
     }
@@ -627,7 +682,14 @@ export default function BroadsheetView() {
                           {row.fullname}
                         </TableCell>
                         {subjects.map((subj) => {
-                          const score = row.subjects[subj] || 0;
+                          const score = row.subjects[subj];
+                          if (score === null || score === undefined) {
+                            return (
+                              <TableCell key={subj} className="text-center">
+                                <span className="text-gray-300">—</span>
+                              </TableCell>
+                            );
+                          }
                           return (
                             <TableCell key={subj} className="text-center">
                               <span
@@ -672,9 +734,10 @@ export default function BroadsheetView() {
                     <TableRow className="bg-muted/50 font-bold">
                       <TableCell className="sticky left-0 bg-muted/50" colSpan={2}>Class Average</TableCell>
                       {subjects.map((subj) => {
-                        const avg = rows.length > 0
-                          ? (rows.reduce((s, r) => s + (r.subjects[subj] || 0), 0) / rows.length).toFixed(1)
-                          : "0";
+                        const studentsWithScore = rows.filter((r) => r.subjects[subj] !== null && r.subjects[subj] !== undefined);
+                        const avg = studentsWithScore.length > 0
+                          ? (studentsWithScore.reduce((s, r) => s + (r.subjects[subj] as number), 0) / studentsWithScore.length).toFixed(1)
+                          : "—";
                         return (
                           <TableCell key={subj} className="text-center text-sm">{avg}</TableCell>
                         );
