@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import {
   createLoginSecurityCheck,
@@ -42,55 +43,49 @@ export async function POST(request: Request) {
     }
 
     // Find user by email (also support regNo for student login)
+    const tenantId = request.headers.get("x-tenant-id") || "";
     let user = await db.user.findFirst({
-      where: { email: sanitizedEmail },
+      where: tenantId ? { email: sanitizedEmail, tenantId } : { email: sanitizedEmail },
     });
-
-    // Find user by email (also support regNo for student login)
-    // Use case-insensitive lookup since regNos may have mixed casing
-    const tenantId = request.headers.get("x-tenant-id");
-
-    // Fetch all users for this tenant and match email case-insensitively
-    // (SQLite doesn't support Prisma mode: "insensitive")
-    const allUsers = tenantId
-      ? await db.user.findMany({ where: { tenantId } })
-      : await db.user.findMany();
-
-    user = allUsers.find(
-      (u) => u.email.toLowerCase() === sanitizedEmail.toLowerCase()
-    ) || null;
 
     // If not found by email, try looking up a student by regNo and match their user
     if (!user) {
-      // SQLite doesn't support mode: "insensitive", so fetch all students and filter in JS
-      const allStudents = tenantId
-        ? await db.student.findMany({ where: { tenantId } })
-        : await db.student.findMany();
 
-      const student = allStudents.find(
-        (s) => s.regNo.toLowerCase() === sanitizedEmail.toLowerCase()
-      );
+      // Try to find student by regNo
+      const student = tenantId
+        ? await db.student.findFirst({
+          where: { regNo: sanitizedEmail, tenantId },
+        })
+        : await db.student.findFirst({
+          where: { regNo: sanitizedEmail },
+        });
 
       if (student) {
         // Look for an existing User linked to this student
-        const existingUser = allUsers.find(
-          (u) => u.studentId === student.id
-        );
+        const existingUser = tenantId
+          ? await db.user.findFirst({
+            where: { studentId: student.id, tenantId },
+          })
+          : await db.user.findFirst({
+            where: { studentId: student.id },
+          });
 
         if (existingUser) {
           user = existingUser;
         } else {
-          // 🔥 AUTO-CREATE: If student exists but no User account, create one
-          const defaultPassword = student.regNo.toLowerCase();
+          // AUTO-CREATE: If student exists but no User account, create one
+          // Match the same format used in students/route.ts: strip slashes & lowercase
+          const defaultPassword = student.regNo.replace(/[/\\s]/g, "").toLowerCase();
 
-          // Only auto-create if the password matches the default (case-insensitive)
-          if (sanitizedPassword.toLowerCase() === defaultPassword.toLowerCase()) {
+          // Only auto-create if the password matches the default
+          if (sanitizedPassword.toLowerCase() === defaultPassword) {
+            const hashedPassword = await bcrypt.hash(defaultPassword, 10);
             user = await db.user.create({
               data: {
                 email: sanitizedEmail,
                 username: student.fullname || `Student-${student.regNo}`,
-                password: defaultPassword,
-                role: "STUDENT",
+                password: hashedPassword,
+                role: "Student",
                 studentId: student.id,
                 tenantId: student.tenantId,
                 imageUrl: student.imageUrl || undefined,
@@ -127,17 +122,34 @@ export async function POST(request: Request) {
       );
     }
 
-    // Plain text password comparison (for demo with SQLite)
-    // Case-insensitive for student accounts (regNo passwords)
-    if (user.role === "STUDENT") {
-      if (user.password.toLowerCase() !== sanitizedPassword.toLowerCase()) {
-        await loginSecurity.onFailed("Invalid password");
-        return NextResponse.json(
-          { success: false, message: "The password you entered is incorrect. Please check your password and try again.", code: "INVALID_PASSWORD" },
-          { status: 401 }
-        );
+    // Password verification using bcrypt (with legacy plain text fallback)
+    // For students, normalize the password the same way default passwords are generated:
+    // strip slashes/spaces and lowercase. Accept both the raw regNo and the stripped form.
+    const normalizedStudentPassword = sanitizedPassword.replace(/[/\\s]/g, "").toLowerCase();
+    const inputPassword = user.role === "Student"
+      ? sanitizedPassword.toLowerCase()
+      : sanitizedPassword;
+
+    let passwordValid = false;
+    if (user.password.startsWith("$2")) {
+      // bcrypt hash — try both raw and stripped forms for students
+      if (user.role === "Student") {
+        passwordValid = await bcrypt.compare(inputPassword, user.password)
+          || await bcrypt.compare(normalizedStudentPassword, user.password);
+      } else {
+        passwordValid = await bcrypt.compare(inputPassword, user.password);
       }
-    } else if (user.password !== sanitizedPassword) {
+    } else {
+      // Legacy plain text fallback
+      if (user.role === "Student") {
+        passwordValid = user.password.toLowerCase() === inputPassword
+          || user.password.toLowerCase() === normalizedStudentPassword;
+      } else {
+        passwordValid = user.password === sanitizedPassword;
+      }
+    }
+
+    if (!passwordValid) {
       await loginSecurity.onFailed("Invalid password");
       return NextResponse.json(
         { success: false, message: "The password you entered is incorrect. Please check your password and try again.", code: "INVALID_PASSWORD" },
@@ -155,7 +167,6 @@ export async function POST(request: Request) {
         {
           success: false,
           message: "Tenant not found",
-          code: "SERVER_ERROR",
         },
         { status: 500 }
       );
@@ -252,32 +263,13 @@ export async function POST(request: Request) {
     );
   } catch (error: unknown) {
     console.error("Login API error:", error);
-
-    // Detect connectivity / database reachability errors caused by network issues
-    const errMsg = error instanceof Error ? error.message.toLowerCase() : "";
-    const isNetworkRelated =
-      errMsg.includes("econnrefused") ||
-      errMsg.includes("enotfound") ||
-      errMsg.includes("etimedout") ||
-      errMsg.includes("econnreset") ||
-      errMsg.includes("socket hang up") ||
-      errMsg.includes("can't reach database") ||
-      errMsg.includes("unable to connect") ||
-      errMsg.includes("fetch failed") ||
-      errMsg.includes("network") ||
-      errMsg.includes("prisma") ||
-      errMsg.includes("sqlite") ||
-      errMsg.includes("database");
-
     return NextResponse.json(
       {
         success: false,
-        message: isNetworkRelated
-          ? "The server could not process your request due to a network issue. Please check your internet connection and try again."
-          : "Something went wrong on our end. Please try again in a few moments. If the problem persists, contact support.",
-        code: isNetworkRelated ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR",
+        message: "Something went wrong on our end. Please try again in a few moments. If the problem persists, contact support.",
+        code: "SERVER_ERROR",
       },
-      { status: 503 }
+      { status: 500 }
     );
   }
 }
