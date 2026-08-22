@@ -122,7 +122,10 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "Billing",
-    items: [{ label: "Subscription", page: "subscription", icon: CreditCard }],
+    items: [
+      { label: "Subscription", page: "subscription", icon: CreditCard },
+      { label: "Monthly Dues", page: "billing", icon: Wallet },
+    ],
   },
 ];
 
@@ -317,7 +320,7 @@ function SidebarContent({
   allGroups.splice(3, 0, ...roleSections);
 
   return (
-    <ScrollArea className="h-full px-3 py-2">
+    <ScrollArea className="flex-1 min-h-0 px-3 py-2">
       <div className="space-y-0.5">
         {allGroups.map((group) => (
           <NavGroupSection

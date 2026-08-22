@@ -79,6 +79,7 @@ model Tenant {
   parents               Parent[]
   parentStudents        ParentStudent[]
   paymentEvidences      PaymentEvidence[]
+  monthlyDues           MonthlyDue[]
   aiResources           AiResource[]
   teacherActivities     TeacherActivity[]
   lessonPlans           LessonPlan[]
@@ -805,6 +806,7 @@ model SubscriptionPlan {
   subtitle     String   @default("")
   priceUSD     Float    @default(0)
   priceNGN     Float    @default(0)
+  monthlyDueNGN Float   @default(0) // Monthly maintenance fee
   priceLabel   String   @default("/session") // e.g. "/session", "/month", "forever"
   validityDays Int      @default(30) // how many days the plan lasts
   maxStudents  Int      @default(50)
@@ -907,4 +909,35 @@ model LessonPlan {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, teacherId])
+}
+
+// ==========================================
+// MONTHLY MAINTENANCE DUES
+// ==========================================
+
+model MonthlyDue {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenantName      String   @default("")
+  month           String   // Format: "2025-08" (YYYY-MM)
+  amount          Float    // Amount owed this month
+  status          String   @default("unpaid") // unpaid, paid, overdue
+  paidAt          DateTime?
+  evidenceFileName String  @default("")
+  evidenceFileData String  @default("") // base64 encoded
+  evidenceFileSize String  @default("")
+  evidenceFileType String  @default("")
+  reference       String   @default("") // Transaction reference/teller number
+  note            String   @default("")
+  reviewedBy      String   @default("")
+  reviewNote      String   @default("")
+  reviewedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month]) // One due per school per month
+  @@index([tenantId, status])
+  @@index([status])
 }

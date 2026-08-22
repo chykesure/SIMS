@@ -3,34 +3,20 @@ import { db } from "@/lib/db";
 
 // ─── GET /api/tenant/plan-config ─────────────────────────────────────────────
 // Returns active plans for the school to display on their subscription page.
-// This is the dynamic source of truth — when dev changes prices here, schools see it.
+// Uses raw SQL so monthlyDueNGN is returned even if Prisma client is out of sync.
 
 export async function GET() {
   try {
-    const plans = await db.subscriptionPlan.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: "asc" },
-      select: {
-        planKey: true,
-        name: true,
-        subtitle: true,
-        priceUSD: true,
-        priceNGN: true,
-        priceLabel: true,
-        validityDays: true,
-        maxStudents: true,
-        maxUsers: true,
-        features: true,
-      },
-    });
+    const rows = await db.$queryRawUnsafe(
+      `SELECT * FROM "SubscriptionPlan" WHERE "isActive" = true ORDER BY "sortOrder" ASC`
+    );
 
-    // Parse features and format for frontend consumption
-    const parsed = plans.map((p) => ({
+    const plans = (rows as Record<string, unknown>[]).map((p) => ({
       ...p,
-      features: JSON.parse(p.features || "[]"),
+      features: JSON.parse((p.features as string) || "[]"),
     }));
 
-    return NextResponse.json({ success: true, plans: parsed });
+    return NextResponse.json({ success: true, plans });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Unknown error occurred";

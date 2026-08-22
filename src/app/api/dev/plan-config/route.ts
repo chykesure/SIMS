@@ -10,6 +10,7 @@ const DEFAULT_PLANS = [
     subtitle: "For small schools",
     priceUSD: 13,
     priceNGN: 20000,
+    monthlyDueNGN: 0,
     priceLabel: "/termly",
     validityDays: 90,
     maxStudents: 50,
@@ -31,6 +32,7 @@ const DEFAULT_PLANS = [
     subtitle: "For growing schools",
     priceUSD: 23,
     priceNGN: 35000,
+    monthlyDueNGN: 0,
     priceLabel: "/termly",
     validityDays: 90,
     maxStudents: 200,
@@ -54,6 +56,7 @@ const DEFAULT_PLANS = [
     subtitle: "For established schools",
     priceUSD: 27,
     priceNGN: 40000,
+    monthlyDueNGN: 0,
     priceLabel: "/termly",
     validityDays: 90,
     maxStudents: 500,
@@ -78,6 +81,7 @@ const DEFAULT_PLANS = [
     subtitle: "For large school networks",
     priceUSD: 33,
     priceNGN: 50000,
+    monthlyDueNGN: 0,
     priceLabel: "/termly",
     validityDays: 90,
     maxStudents: 999999,
@@ -100,29 +104,44 @@ const DEFAULT_PLANS = [
 ];
 
 // ─── GET /api/dev/plan-config ────────────────────────────────────────────────
+// Raw SQL — Prisma client doesn't know monthlyDueNGN, so findMany strips it.
 
 export async function GET() {
   try {
-    // Auto-seed if no plans exist
-    const count = await db.subscriptionPlan.count();
-    if (count === 0) {
-      await db.subscriptionPlan.createMany({ data: DEFAULT_PLANS });
+    // Auto-seed if empty
+    const countResult = await db.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS count FROM "SubscriptionPlan"`
+    );
+    const count = (countResult as Record<string, unknown>[])[0]?.count as number;
+
+    if (!count) {
+      for (const plan of DEFAULT_PLANS) {
+        const keys = Object.keys(plan);
+        const vals = Object.values(plan);
+        const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(", ");
+        const columns = keys.map((k) => `"${k}"`).join(", ");
+        await db.$executeRawUnsafe(
+          `INSERT INTO "SubscriptionPlan" (${columns}) VALUES (${placeholders})`,
+          ...vals
+        );
+      }
     }
 
-    const plans = await db.subscriptionPlan.findMany({
-      orderBy: { sortOrder: "asc" },
-    });
+    // Fetch ALL plans using raw SQL — returns monthlyDueNGN from DB
+    const rows = await db.$queryRawUnsafe(
+      `SELECT * FROM "SubscriptionPlan" ORDER BY "sortOrder" ASC`
+    );
 
-    // Parse features from JSON string
-    const parsed = plans.map((p) => ({
+    const plans = (rows as Record<string, unknown>[]).map((p) => ({
       ...p,
-      features: JSON.parse(p.features || "[]"),
+      features: JSON.parse((p.features as string) || "[]"),
     }));
 
-    return NextResponse.json({ success: true, plans: parsed });
+    return NextResponse.json({ success: true, plans });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Unknown error occurred";
+    console.error("Plan config fetch error:", error);
     return NextResponse.json(
       { success: false, message: `Failed to fetch plan configs: ${message}` },
       { status: 500 }
@@ -131,6 +150,7 @@ export async function GET() {
 }
 
 // ─── PUT /api/dev/plan-config ────────────────────────────────────────────────
+// Raw SQL — ensures monthlyDueNGN saves even if Prisma client is out of sync.
 
 export async function PUT(request: Request) {
   try {
@@ -151,129 +171,143 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Find the plan
-    const existing = await db.subscriptionPlan.findUnique({
-      where: { id: planId },
-    });
-
-    if (!existing) {
+    // Check plan exists
+    const existing = await db.$queryRawUnsafe(
+      `SELECT "id" FROM "SubscriptionPlan" WHERE "id" = $1`,
+      planId
+    );
+    if (!(existing as Record<string, unknown>[]).length) {
       return NextResponse.json(
         { success: false, message: "Plan not found." },
         { status: 404 }
       );
     }
 
-    // Build update data with validation
-    const data: Record<string, unknown> = {};
+    // ── Build SET clauses using raw SQL ──
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+    let i = 1;
 
     if (updates.name !== undefined) {
       if (typeof updates.name !== "string" || updates.name.trim().length === 0) {
-        return NextResponse.json(
-          { success: false, message: "Plan name must be a non-empty string." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Plan name must be a non-empty string." }, { status: 400 });
       }
-      data.name = updates.name.trim();
+      setClauses.push(`"name" = $${i++}`);
+      params.push(updates.name.trim());
     }
 
     if (updates.subtitle !== undefined) {
-      data.subtitle = String(updates.subtitle ?? "");
+      setClauses.push(`"subtitle" = $${i++}`);
+      params.push(String(updates.subtitle ?? ""));
     }
 
     if (updates.priceUSD !== undefined) {
       const val = Number(updates.priceUSD);
       if (isNaN(val) || val < 0) {
-        return NextResponse.json(
-          { success: false, message: "Price (USD) must be a non-negative number." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Price (USD) must be a non-negative number." }, { status: 400 });
       }
-      data.priceUSD = val;
+      setClauses.push(`"priceUSD" = $${i++}`);
+      params.push(val);
     }
 
     if (updates.priceNGN !== undefined) {
       const val = Number(updates.priceNGN);
       if (isNaN(val) || val < 0) {
-        return NextResponse.json(
-          { success: false, message: "Price (NGN) must be a non-negative number." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Price (NGN) must be a non-negative number." }, { status: 400 });
       }
-      data.priceNGN = val;
+      setClauses.push(`"priceNGN" = $${i++}`);
+      params.push(val);
+    }
+
+    if (updates.monthlyDueNGN !== undefined) {
+      const val = Number(updates.monthlyDueNGN);
+      if (isNaN(val) || val < 0) {
+        return NextResponse.json({ success: false, message: "Monthly due (NGN) must be a non-negative number." }, { status: 400 });
+      }
+      setClauses.push(`"monthlyDueNGN" = $${i++}`);
+      params.push(val);
     }
 
     if (updates.priceLabel !== undefined) {
-      data.priceLabel = String(updates.priceLabel ?? "/session");
+      setClauses.push(`"priceLabel" = $${i++}`);
+      params.push(String(updates.priceLabel ?? "/session"));
     }
 
     if (updates.validityDays !== undefined) {
       const val = Number(updates.validityDays);
       if (isNaN(val) || val < 1) {
-        return NextResponse.json(
-          { success: false, message: "Validity days must be at least 1." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Validity days must be at least 1." }, { status: 400 });
       }
-      data.validityDays = val;
+      setClauses.push(`"validityDays" = $${i++}`);
+      params.push(val);
     }
 
     if (updates.maxStudents !== undefined) {
       const val = Number(updates.maxStudents);
       if (isNaN(val) || val < 1) {
-        return NextResponse.json(
-          { success: false, message: "Max students must be at least 1." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Max students must be at least 1." }, { status: 400 });
       }
-      data.maxStudents = val;
+      setClauses.push(`"maxStudents" = $${i++}`);
+      params.push(val);
     }
 
     if (updates.maxUsers !== undefined) {
       const val = Number(updates.maxUsers);
       if (isNaN(val) || val < 1) {
-        return NextResponse.json(
-          { success: false, message: "Max users must be at least 1." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Max users must be at least 1." }, { status: 400 });
       }
-      data.maxUsers = val;
+      setClauses.push(`"maxUsers" = $${i++}`);
+      params.push(val);
     }
 
     if (updates.features !== undefined) {
       if (!Array.isArray(updates.features)) {
-        return NextResponse.json(
-          { success: false, message: "Features must be an array of strings." },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, message: "Features must be an array of strings." }, { status: 400 });
       }
-      data.features = JSON.stringify(updates.features);
+      setClauses.push(`"features" = $${i++}`);
+      params.push(JSON.stringify(updates.features));
     }
 
     if (updates.isActive !== undefined) {
-      data.isActive = Boolean(updates.isActive);
+      setClauses.push(`"isActive" = $${i++}`);
+      params.push(Boolean(updates.isActive));
     }
 
     if (updates.sortOrder !== undefined) {
-      data.sortOrder = Number(updates.sortOrder) || 0;
+      setClauses.push(`"sortOrder" = $${i++}`);
+      params.push(Number(updates.sortOrder) || 0);
     }
 
-    // Update the plan
-    const updated = await db.subscriptionPlan.update({
-      where: { id: planId },
-      data,
-    });
+    if (setClauses.length === 0) {
+      return NextResponse.json({ success: false, message: "No valid fields to update." }, { status: 400 });
+    }
+
+    // Add WHERE param (planId) as last parameter
+    params.push(planId);
+    const whereIndex = i;
+
+    const sql = `UPDATE "SubscriptionPlan" SET ${setClauses.join(", ")}, "updatedAt" = NOW() WHERE "id" = $${whereIndex}`;
+
+    await db.$executeRawUnsafe(sql, ...params);
+
+    // Fetch updated row using raw SQL
+    const rows = await db.$queryRawUnsafe(
+      `SELECT * FROM "SubscriptionPlan" WHERE "id" = $1`,
+      planId
+    );
+    const plan = (rows as Record<string, unknown>[])[0];
 
     return NextResponse.json({
       success: true,
-      message: `Plan "${updated.name}" updated successfully.`,
+      message: `Plan "${plan.name}" updated successfully.`,
       plan: {
-        ...updated,
-        features: JSON.parse(updated.features || "[]"),
+        ...plan,
+        features: JSON.parse((plan.features as string) || "[]"),
       },
     });
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Unknown error occurred";
+    const message = error instanceof Error ? error.message : "Unknown error occurred";
+    console.error("Plan config update error:", error);
     return NextResponse.json(
       { success: false, message: `Failed to update plan config: ${message}` },
       { status: 500 }

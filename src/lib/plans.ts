@@ -12,6 +12,7 @@ export interface PlanConfig {
   subtitle: string;
   priceUSD: number;
   priceNGN: number;
+  monthlyDueNGN: number;
   validityDays: number;
   maxStudents: number;
   maxUsers: number;
@@ -33,6 +34,7 @@ export interface PlanDisplay {
   popular: boolean;
   priceNGN: number;
   priceUSD: number;
+  monthlyDueNGN: number;
   validityDays: number;
   maxStudents: number;
   maxUsers: number;
@@ -46,6 +48,7 @@ const FALLBACK_PLANS: PlanConfig[] = [
     subtitle: "For small schools",
     priceUSD: 13,
     priceNGN: 20000,
+    monthlyDueNGN: 0,
     validityDays: 90,
     maxStudents: 50,
     maxUsers: 3,
@@ -66,6 +69,7 @@ const FALLBACK_PLANS: PlanConfig[] = [
     subtitle: "For growing schools",
     priceUSD: 23,
     priceNGN: 35000,
+    monthlyDueNGN: 0,
     validityDays: 90,
     maxStudents: 200,
     maxUsers: 15,
@@ -87,6 +91,7 @@ const FALLBACK_PLANS: PlanConfig[] = [
     subtitle: "For established schools",
     priceUSD: 27,
     priceNGN: 40000,
+    monthlyDueNGN: 0,
     validityDays: 90,
     maxStudents: 500,
     maxUsers: 100,
@@ -109,6 +114,7 @@ const FALLBACK_PLANS: PlanConfig[] = [
     subtitle: "For large school networks",
     priceUSD: 33,
     priceNGN: 50000,
+    monthlyDueNGN: 0,
     validityDays: 90,
     maxStudents: 999999,
     maxUsers: 999999,
@@ -136,28 +142,29 @@ const PLAN_META: Record<string, { icon: string; color: string }> = {
   growth: { icon: "Shield", color: "border-emerald-200" },
 };
 
-// Fetch plans from DB (server-side only)
+// Fetch plans from DB using raw SQL — Prisma client strips monthlyDueNGN
 export async function getPlansFromDB(): Promise<PlanConfig[]> {
   try {
-    const plans = await db.subscriptionPlan.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: "asc" },
-    });
+    const rows = await db.$queryRawUnsafe(
+      `SELECT * FROM "SubscriptionPlan" WHERE "isActive" = true ORDER BY "sortOrder" ASC`
+    );
 
+    const plans = rows as Record<string, unknown>[];
     if (plans.length === 0) return FALLBACK_PLANS;
 
     return plans.map((p) => ({
-      planKey: p.planKey,
-      name: p.name,
-      subtitle: p.subtitle || "",
-      priceUSD: p.priceUSD,
-      priceNGN: p.priceNGN,
-      validityDays: p.validityDays,
-      maxStudents: p.maxStudents,
-      maxUsers: p.maxUsers,
+      planKey: p.planKey as string,
+      name: p.name as string,
+      subtitle: (p.subtitle as string) || "",
+      priceUSD: Number(p.priceUSD) || 0,
+      priceNGN: Number(p.priceNGN) || 0,
+      monthlyDueNGN: Number(p.monthlyDueNGN) || 0,
+      validityDays: Number(p.validityDays) || 90,
+      maxStudents: Number(p.maxStudents) || 50,
+      maxUsers: Number(p.maxUsers) || 3,
       features: typeof p.features === "string" ? JSON.parse(p.features) : (p.features as PlanFeature[]),
-      isActive: p.isActive,
-      sortOrder: p.sortOrder,
+      isActive: Boolean(p.isActive),
+      sortOrder: Number(p.sortOrder) || 0,
     }));
   } catch {
     return FALLBACK_PLANS;
@@ -175,7 +182,7 @@ export async function getDisplayPlans(): Promise<PlanDisplay[]> {
       name: p.name,
       subtitle: p.subtitle,
       price: `\u20A6${p.priceNGN.toLocaleString()}`,
-      period: `/${Math.round(p.validityDays / 30)} months`,
+      period: " / Full License",
       icon: meta.icon,
       color: meta.color,
       features: p.features.map((f) => typeof f === "string" ? f : (f as PlanFeature).label || ""),
@@ -183,6 +190,7 @@ export async function getDisplayPlans(): Promise<PlanDisplay[]> {
       popular: p.planKey === "premium",
       priceNGN: p.priceNGN,
       priceUSD: p.priceUSD,
+      monthlyDueNGN: p.monthlyDueNGN,
       validityDays: p.validityDays,
       maxStudents: p.maxStudents,
       maxUsers: p.maxUsers,

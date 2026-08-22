@@ -391,7 +391,7 @@ export function TeacherSidebar() {
             <div className="flex h-full flex-col overflow-hidden">
               {brandingHeader}
               <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent shrink-0" />
-              <ScrollArea className="flex-1 px-3 py-2">
+              <ScrollArea className="flex-1 min-h-0 px-3 py-2">
                 <div className="space-y-0.5">
                   {NAV_GROUPS.map((group) => (
                     <NavGroupSection
@@ -435,7 +435,7 @@ export function TeacherSidebar() {
     >
       {brandingHeader}
       <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent shrink-0" />
-      <ScrollArea className="flex-1 px-3 py-2">
+      <ScrollArea className="flex-1 min-h-0 px-3 py-2">
         <div className="space-y-0.5">
           {NAV_GROUPS.map((group) => (
             <NavGroupSection

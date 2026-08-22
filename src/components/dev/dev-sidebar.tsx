@@ -24,6 +24,7 @@ import {
   Settings,
   Calendar,
   LogOut,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -38,6 +39,7 @@ const navItems: NavItem[] = [
   { label: 'Schools', page: 'dev-schools', icon: School },
   { label: 'Payment Verification', page: 'dev-payments', icon: Receipt },
   { label: 'Subscription Plans', page: 'dev-plans', icon: CreditCard },
+  { label: 'Monthly Dues', page: 'dev-monthly-dues', icon: Wallet },
   { label: 'Session Management', page: 'dev-sessions', icon: Calendar },
   { label: 'Activity Log', page: 'dev-activity-log', icon: Activity },
   { label: 'Security', page: 'dev-security', icon: Lock },

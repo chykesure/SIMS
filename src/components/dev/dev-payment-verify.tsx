@@ -406,13 +406,11 @@ function DetailModal({
                 />
               </div>
             ) : isPdf ? (
-              <div className="flex flex-col items-center justify-center py-16 text-rose-400">
-                <FileText className="size-16 mb-3" />
-                <p className="text-sm font-medium text-rose-500">PDF Document</p>
-                <p className="text-xs text-slate-400 mt-1">
-                  {evidence.fileName || 'document.pdf'} &middot; {formatFileSize(evidence.fileSize)}
-                </p>
-              </div>
+              <iframe
+                src={`/api/dev/payment-evidence/${evidence.id}/file`}
+                className="w-full h-[500px] border-0"
+                title={evidence.fileName || 'Payment evidence PDF'}
+              />
             ) : evidence.fileData ? (
               <div className="flex flex-col items-center justify-center py-16 text-slate-400">
                 <FileText className="size-16 mb-3" />

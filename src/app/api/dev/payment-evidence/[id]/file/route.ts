@@ -39,8 +39,15 @@ export async function GET(
       );
     }
 
+    // Strip data-URL prefix if present (e.g. "data:application/pdf;base64,")
+    let raw = record.fileData;
+    const commaIdx = raw.indexOf(',');
+    if (commaIdx !== -1) {
+      raw = raw.substring(commaIdx + 1);
+    }
+
     // Decode base64 to buffer
-    const fileBuffer = Buffer.from(record.fileData, "base64");
+    const fileBuffer = Buffer.from(raw, "base64");
 
     // Determine content type from stored fileType or infer from extension
     const contentType = record.fileType || "application/octet-stream";
@@ -49,10 +56,15 @@ export async function GET(
     const sanitizedFileName = record.fileName
       .replace(/[^a-zA-Z0-9._-]/g, "_");
 
+    // For PDFs, use inline so the browser can render them in an iframe
+    // For other files, use attachment to force download
+    const isPdf = contentType === "application/pdf" || (record.fileName && record.fileName.toLowerCase().endsWith(".pdf"));
+    const disposition = isPdf ? `inline; filename="${sanitizedFileName}"` : `attachment; filename="${sanitizedFileName}"`;
+
     return new NextResponse(fileBuffer, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${sanitizedFileName}"`,
+        "Content-Disposition": disposition,
         "Content-Length": fileBuffer.length.toString(),
         "Cache-Control": "no-cache",
       },

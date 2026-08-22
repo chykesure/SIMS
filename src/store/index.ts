@@ -4,6 +4,7 @@ export type PageView =
   | "login"
   | "register"
   | "pending-approval"
+  | "payment-upload"
   | "admission"
   | "session-select"
   | "subscription"
@@ -66,10 +67,13 @@ export type PageView =
   | "teacher-profile"
   | "teacher-results"
   | "teacher-broadsheet"
+  | "billing"
+  | "payment-blocked"
+  | "dev-monthly-dues"
   | "attendance";
 
 const VALID_PAGES = new Set<string>([
-  "login", "register", "pending-approval", "admission", "session-select",
+  "login", "register", "pending-approval", "payment-upload", "admission", "session-select",
   "subscription", "dashboard", "students", "student-add", "teachers",
   "subjects", "classes", "sessions", "exams", "results", "grading",
   "card-settings", "broadsheet", "remarks", "signatures", "class-position",
@@ -85,6 +89,9 @@ const VALID_PAGES = new Set<string>([
   "teacher-announcements", "teacher-add-student", "teacher-students",
   "teacher-subjects", "teacher-ai-assistant", "teacher-profile", "teacher-results",
   "teacher-broadsheet",
+  "billing", "payment-blocked",
+  "parent-dashboard", "parent-results",
+  "dev-monthly-dues",
 ]);
 
 interface User {
@@ -92,7 +99,7 @@ interface User {
   email: string;
   username: string;
   role: string;
-  roles?: string[];  // NEW: multi-role support from UserRole table
+  roles?: string[];
   imageUrl?: string;
   tenantId?: string | null;
   studentId?: string | null;
@@ -119,6 +126,16 @@ interface Tenant {
   planEnd?: string;
 }
 
+interface RegistrationData {
+  tenantId: string;
+  tenantName: string;
+  plan: string;
+  amountNGN: number;
+  amountUSD: number;
+  adminEmail: string;
+  studentCount: number;
+}
+
 interface AppState {
   currentPage: PageView;
   isAuthenticated: boolean;
@@ -132,6 +149,9 @@ interface AppState {
   pendingSchoolName: string | null;
   selectedSchoolId: string | null;
   selectedSession: string | null;
+  selectedChildId: string | null;
+
+  registrationData: RegistrationData | null;
 
   navigate: (page: PageView) => void;
   login: (user: User) => void;
@@ -143,6 +163,8 @@ interface AppState {
   setPendingSchoolName: (name: string | null) => void;
   viewSchoolDetail: (schoolId: string) => void;
   setSelectedSession: (sessionId: string) => void;
+  setSelectedChildId: (id: string | null) => void;
+  setRegistrationData: (data: RegistrationData | null) => void;
   hydrateFromUrl: () => void;
   startImpersonation: (user: User, tenant: Tenant, sessionId?: string | null) => void;
   stopImpersonation: () => void;
@@ -172,9 +194,10 @@ export const useAppStore = create<AppState>((set) => ({
   pendingSchoolName: null,
   selectedSchoolId: null,
   selectedSession: null,
+  selectedChildId: null,
+  registrationData: null,
 
   navigate: (page) => {
-    // Update browser URL without reload
     const url = page === "login"
       ? window.location.pathname
       : `${window.location.pathname}?p=${page}`;
@@ -184,9 +207,10 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   login: (user) => {
-    const targetPage = user.role === "SuperAdmin"
+    const roleLower = (user.role || "").toLowerCase();
+    const targetPage = roleLower === "superadmin"
       ? "dev-dashboard"
-      : user.role === "STUDENT"
+      : roleLower === "student"
         ? "student-dashboard"
         : "session-select";
     const url = `${window.location.pathname}?p=${targetPage}`;
@@ -211,8 +235,10 @@ export const useAppStore = create<AppState>((set) => ({
       savedDevUser: null,
       currentPage: "login",
       selectedSession: null,
+      selectedChildId: null,
       pendingSchoolName: null,
       selectedSchoolId: null,
+      registrationData: null,
     });
   },
 
@@ -237,6 +263,10 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   setSelectedSession: (sessionId) => set({ selectedSession: sessionId }),
+
+  setSelectedChildId: (id) => set({ selectedChildId: id }),
+
+  setRegistrationData: (data) => set({ registrationData: data }),
 
   startImpersonation: (user, tenant, sessionId) => {
     const url = `${window.location.pathname}?p=dashboard`;

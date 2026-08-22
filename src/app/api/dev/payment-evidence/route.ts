@@ -179,10 +179,11 @@ export async function POST(request: Request) {
       },
     });
 
-    // CRITICAL: Update the tenant's plan and limits
+    // CRITICAL: Update the tenant's plan, limits, and activate the account
     const updatedTenant = await db.tenant.update({
       where: { id: evidence.tenantId },
       data: {
+        status: "active",
         plan: evidence.targetPlan,
         maxStudents: planConfig.maxStudents,
         maxUsers: planConfig.maxUsers,

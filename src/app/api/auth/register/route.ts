@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { sendEmail, buildRegistrationEmail } from "@/lib/email";
 
@@ -164,6 +165,23 @@ export async function POST(request: Request) {
 
     console.log("[REGISTER] Determined plan:", { plan, maxStudents, maxUsers, studentNum });
 
+    // ─── Get the plan's NGN & USD price from DB (raw SQL for reliability) ──
+    let planPriceNGN = 0;
+    let planPriceUSD = 0;
+    try {
+      const planRow = await db.$queryRawUnsafe<Array<{ priceNGN: number; priceUSD: number }>>(
+        `SELECT "priceNGN", "priceUSD" FROM "SubscriptionPlan" WHERE "planKey" = $1 AND "isActive" = true`,
+        plan
+      );
+      if (planRow.length > 0) {
+        planPriceNGN = Number(planRow[0].priceNGN) || 0;
+        planPriceUSD = Number(planRow[0].priceUSD) || 0;
+      }
+      console.log("[REGISTER] Plan price:", { plan, planPriceNGN, planPriceUSD });
+    } catch (e) {
+      console.error("[REGISTER] Failed to fetch plan price:", e);
+    }
+
     // Create tenant with status "pending" — requires cloud engineer approval
     const tenant = await db.tenant.create({
       data: {
@@ -183,12 +201,13 @@ export async function POST(request: Request) {
       },
     });
 
-    // Create admin user
+    // Create admin user (hash password with bcrypt)
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
     const user = await db.user.create({
       data: {
         tenantId: tenant.id,
         email: adminEmail,
-        password: adminPassword,
+        password: hashedPassword,
         username: adminName,
         role: "Admin",
         imageUrl: "",
@@ -260,6 +279,8 @@ export async function POST(request: Request) {
           status: tenant.status,
           plan: tenant.plan,
         },
+        planPriceNGN,
+        planPriceUSD,
       },
       { status: 201 }
     );

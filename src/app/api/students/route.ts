@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 
 function getTenantId(request: Request): string {
@@ -19,13 +20,18 @@ async function generateRegNo(tenantId: string): Promise<string> {
     .toUpperCase()
     .slice(0, 3) || "SCH";
 
-  const currentResumption = await db.resumption.findFirst({
-    where: { tenantId },
-    orderBy: { createdAt: "desc" },
+  // Get active session from Session table
+  const activeSession = await db.session.findFirst({
+    where: { tenantId, active: "Yes" },
   });
-  const session =
-    currentResumption?.session ||
-    `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`;
+
+  // Fallback to Resumption table, then current year
+  const session = activeSession
+    ? `${activeSession.sessionOne}/${activeSession.sessionTwo}`
+    : await db.resumption.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: "desc" },
+      }).then((r) => r?.session || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`);
 
   const count = await db.student.count({ where: { tenantId } });
   const nextNum = count + 1;
@@ -57,15 +63,11 @@ export async function GET(request: Request) {
     const tenantId = getTenantId(request);
     const { searchParams } = new URL(request.url);
     const classFilter = searchParams.get("class");
-    const departmentFilter = searchParams.get("department");
     const q = searchParams.get("q")?.trim() || "";
 
     const where: Record<string, unknown> = { tenantId };
     if (classFilter) {
       where.class = { equals: classFilter };
-    }
-    if (departmentFilter) {
-      where.department = { equals: departmentFilter };
     }
     if (q) {
       where.OR = [
@@ -101,6 +103,37 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { success: false, message: "Fullname and class are required" },
         { status: 400 }
+      );
+    }
+
+    // ─── Check for active session ───
+    const activeSession = await db.session.findFirst({
+      where: { tenantId, active: "Yes" },
+    });
+
+    if (!activeSession) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "No active academic session found. Please set an active session before adding students.",
+          code: "NO_ACTIVE_SESSION",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ─── Check for duplicate student (same fullname + class in same tenant) ───
+    const duplicate = await db.student.findFirst({
+      where: { tenantId, fullname, class: studentClass },
+    });
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `A student named "${fullname}" already exists in class "${studentClass}". Duplicate entries are not allowed.`,
+          code: "DUPLICATE_STUDENT",
+        },
+        { status: 409 }
       );
     }
 
@@ -140,7 +173,8 @@ export async function POST(request: Request) {
       },
     });
 
-    const defaultPassword = regNo.replace(/[/\s]/g, "").toLowerCase();
+    const defaultPassword = regNo.replace(/[/\\s]/g, "").toLowerCase();
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
     const existingUser = await db.user.findFirst({
       where: { tenantId, email: regNo },
     });
@@ -151,7 +185,7 @@ export async function POST(request: Request) {
           tenantId,
           email: regNo,
           username: fullname,
-          password: defaultPassword,
+          password: hashedPassword,
           role: "Student",
           studentId: student.id,
           imageUrl: imageUrl || "",
@@ -197,6 +231,30 @@ export async function PUT(request: Request) {
         { success: false, message: "Student not found" },
         { status: 404 }
       );
+    }
+
+    // If fullname or class is being changed, check for duplicates (excluding current student)
+    if (data.fullname || data.class) {
+      const newFullname = data.fullname || existing.fullname;
+      const newClass = data.class || existing.class;
+      const duplicate = await db.student.findFirst({
+        where: {
+          tenantId,
+          fullname: newFullname,
+          class: newClass,
+          id: { not: id },
+        },
+      });
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `A student named "${newFullname}" already exists in class "${newClass}". Duplicate entries are not allowed.`,
+            code: "DUPLICATE_STUDENT",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const student = await db.student.update({

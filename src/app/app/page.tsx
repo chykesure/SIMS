@@ -1,3 +1,4 @@
+//src/app/app/page.tsx
 "use client";
 
 import "@/lib/fetch-interceptor";
@@ -41,6 +42,7 @@ import { DevSecurity } from "@/components/dev/dev-security";
 import { DevActivityLog } from "@/components/dev/dev-activity-log";
 import { DevSettings } from "@/components/dev/dev-settings";
 import { DevSchoolDetail } from "@/components/dev/dev-school-detail";
+import { DevMonthlyDues } from "@/components/dev/dev-monthly-dues";
 import { DevSessions } from "@/components/dev/dev-sessions";
 import ParentListView from "@/components/parents/parent-list";
 import { StudentSidebar } from "@/components/student/student-sidebar";
@@ -69,6 +71,9 @@ import SchoolProfilePage from "@/components/settings/school-profile";
 import ScoreImportPage from "@/components/settings/score-import";
 import { TeacherAiAssistant } from "@/components/teacher/teacher-ai-assistant";
 import ProfileView from "@/components/settings/profile-view";
+import { BillingPage } from "@/components/billing/billing-page";
+import PaymentUploadPage from "@/components/auth/payment-upload-page";
+
 
 // ============================================================
 // PORTAL CONTENT COMPONENTS (proper components, not functions!)
@@ -163,6 +168,8 @@ function DevPortalContent() {
       return <DevSecurity />;
     case "dev-settings":
       return <DevSettings />;
+    case "dev-monthly-dues":
+      return <DevMonthlyDues />;
     default:
       return <DevDashboard />;
   }
@@ -227,6 +234,8 @@ function AdminPortalContent() {
       return <SchoolProfilePage />;
     case "score-import":
       return <ScoreImportPage />;
+    case "billing":
+      return <BillingPage />;
     default:
       return <DashboardView />;
   }
@@ -248,6 +257,7 @@ export default function Home() {
   if (currentPage === "register") return <RegisterPage />;
   if (currentPage === "pending-approval") return <PendingApprovalPage />;
   if (currentPage === "admission") return <AdmissionPage />;
+  if (currentPage === "payment-upload") return <PaymentUploadPage />;
 
   // Protected pages
   if (!isAuthenticated) return <LoginPage />;

@@ -231,7 +231,7 @@ export function ParentSidebar() {
 
         <Separator className="bg-slate-800/60" />
 
-        <ScrollArea className="flex-1 px-2 py-3">
+        <ScrollArea className="flex-1 min-h-0 px-2 py-3">
           <div className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon

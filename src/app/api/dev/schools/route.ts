@@ -117,7 +117,6 @@ export async function POST(request: Request) {
       }
       if (status === "approved") {
         updateData.rejectionReason = "";
-        // When approving, set plan limits from DB
         const limits = await getPlanLimits(school.plan || "basic");
         updateData.maxStudents = limits.maxStudents;
         updateData.maxUsers = limits.maxUsers;
@@ -130,6 +129,32 @@ export async function POST(request: Request) {
         where: { id: schoolId },
         data: updateData,
       });
+
+      // Auto-generate first monthly due when approving a school
+      if (status === "approved") {
+        try {
+          const now = new Date();
+          const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const duePlan = await db.subscriptionPlan.findUnique({
+            where: { planKey: updated.plan || 'free' },
+            select: { monthlyDueNGN: true },
+          });
+          const dueAmount = duePlan?.monthlyDueNGN ?? 0;
+          if (dueAmount > 0) {
+            await db.monthlyDue.create({
+              data: {
+                tenantId: updated.id,
+                tenantName: updated.name,
+                month: currentMonth,
+                amount: dueAmount,
+                status: 'unpaid',
+              },
+            });
+          }
+        } catch (autoDueErr) {
+          console.error('[School Approval] Failed to auto-generate monthly due:', autoDueErr);
+        }
+      }
 
       await db.activityLog.create({
         data: {
@@ -171,7 +196,6 @@ export async function POST(request: Request) {
         );
       }
 
-      // Get limits from DB (not hardcoded)
       const limits = await getPlanLimits(plan);
       const now = new Date();
 
@@ -235,6 +259,29 @@ export async function POST(request: Request) {
         },
       });
 
+      // Auto-generate first monthly due when approving a school
+      try {
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const duePlan = await db.subscriptionPlan.findUnique({
+          where: { planKey: planToSet },
+          select: { monthlyDueNGN: true },
+        });
+        const dueAmount = duePlan?.monthlyDueNGN ?? 0;
+        if (dueAmount > 0) {
+          await db.monthlyDue.create({
+            data: {
+              tenantId: updated.id,
+              tenantName: updated.name,
+              month: currentMonth,
+              amount: dueAmount,
+              status: 'unpaid',
+            },
+          });
+        }
+      } catch (autoDueErr) {
+        console.error('[School Approval] Failed to auto-generate monthly due:', autoDueErr);
+      }
+
       await db.activityLog.create({
         data: {
           tenantId: schoolId,
@@ -267,13 +314,11 @@ export async function POST(request: Request) {
         );
       }
 
-      // Mark all pending payment evidence as verified
       await db.paymentEvidence.updateMany({
         where: { tenantId: schoolId, status: "pending" },
         data: { status: "verified" },
       });
 
-      // Extend plan end date
       const limits = await getPlanLimits(school.plan || "basic");
       const currentEnd = school.planEnd ? new Date(school.planEnd) : new Date();
       const baseDate = currentEnd > new Date() ? currentEnd : new Date();
@@ -315,7 +360,6 @@ export async function POST(request: Request) {
 }
 
 // DELETE: Delete a school and all related data
-// DELETE: Delete a school and all related data
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -343,9 +387,8 @@ export async function DELETE(request: Request) {
       );
     }
 
-    await db.$executeRaw`SET session_replication_role = 'replica'`;
-
     const tables = [
+      "MonthlyDue",
       "LoginHistory",
       "ExamScore",
       "StudentRecord",
@@ -396,8 +439,6 @@ export async function DELETE(request: Request) {
     }
 
     await db.$executeRawUnsafe(`DELETE FROM "Tenant" WHERE "id" = $1`, schoolId);
-
-    await db.$executeRaw`SET session_replication_role = 'origin'`;
 
     return NextResponse.json({
       success: true,

@@ -41,6 +41,7 @@ import {
   ShieldAlert,
   UserX,
   KeyRound as KeyRoundIcon,
+  Upload,   // <-- ADD THIS
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/store/index";
@@ -57,23 +58,26 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
+import { PaymentBlockedPage } from "@/components/billing/payment-blocked-page";
+import { PaymentReviewPendingPage } from "@/components/billing/payment-review-pending-page";
 // Status Error Message
 // ---------------------------------------------------------------------------
 
 function StatusMessage({ code, message, lockoutMinutes }: { code: string; message: string; lockoutMinutes?: number }) {
   const config: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; title: string; bg: string; border: string }> = {
     TENANT_PENDING: { icon: Clock, color: "text-amber-600", title: "Account Pending Approval", bg: "bg-amber-50", border: "border-amber-200" },
+    TENANT_PENDING_NO_EVIDENCE: { icon: Upload, color: "text-amber-600", title: "Payment Receipt Required", bg: "bg-amber-50", border: "border-amber-200" },
     TENANT_REJECTED: { icon: X, color: "text-red-600", title: "Registration Rejected", bg: "bg-red-50", border: "border-red-200" },
     TENANT_SUSPENDED: { icon: Shield, color: "text-red-600", title: "Account Suspended", bg: "bg-red-50", border: "border-red-200" },
+    PAYMENT_REJECTED: { icon: X, color: "text-red-600", title: "Payment Evidence Rejected", bg: "bg-red-50", border: "border-red-200" },
     RATE_LIMITED: { icon: ShieldAlert, color: "text-orange-600", title: "Too Many Login Attempts", bg: "bg-orange-50", border: "border-orange-200" },
+    MONTHLY_DUE_UNPAID: { icon: CreditCard, color: "text-amber-600", title: "Outstanding Monthly Due", bg: "bg-amber-50", border: "border-amber-200" },
     SERVER_ERROR: { icon: ServerCrash, color: "text-red-600", title: "Server Error", bg: "bg-red-50", border: "border-red-200" },
-    SERVICE_UNAVAILABLE: { icon: WifiOff, color: "text-red-600", title: "Connection Problem", bg: "bg-red-50", border: "border-red-200" },
     NETWORK_ERROR: { icon: WifiOff, color: "text-red-600", title: "Connection Problem", bg: "bg-red-50", border: "border-red-200" },
     USER_NOT_FOUND: { icon: UserX, color: "text-red-600", title: "Account Not Found", bg: "bg-red-50", border: "border-red-200" },
     INVALID_PASSWORD: { icon: KeyRoundIcon, color: "text-red-600", title: "Incorrect Password", bg: "bg-red-50", border: "border-red-200" },
     NO_USER_ACCOUNT: { icon: UserX, color: "text-amber-600", title: "No Login Account", bg: "bg-amber-50", border: "border-amber-200" },
+    PAYMENT_PENDING_REVIEW: { icon: Clock, color: "text-blue-600", title: "Payment Verification Pending", bg: "bg-blue-50", border: "border-blue-200" },
   };
   const cfg = config[code] || config.SERVER_ERROR;
   const Icon = cfg.icon;
@@ -89,6 +93,32 @@ function StatusMessage({ code, message, lockoutMinutes }: { code: string; messag
           )}
           {code === "NETWORK_ERROR" && (
             <p className="mt-1.5 text-xs text-muted-foreground">Check your internet connection and try again.</p>
+          )}
+          {code === "PAYMENT_PENDING_REVIEW" && (
+            <p className="mt-1.5 text-xs font-medium text-blue-600">Need urgent help? Contact support on WhatsApp: <a href="https://wa.me/2349133273608" target="_blank" rel="noopener noreferrer" className="underline">09133273608</a></p>
+          )}
+          {code === "TENANT_PENDING_NO_EVIDENCE" && (
+            <p className="mt-1.5 text-xs font-medium text-amber-600">
+              <button
+                type="button"
+                onClick={() => {
+                  // This will be handled by the parent's error code redirect
+                  const event = new CustomEvent("redirect-to-payment", {
+                    detail: { tenantId: "from-error" },
+                  });
+                  window.dispatchEvent(event);
+                }}
+                className="underline hover:no-underline"
+              >
+                Upload your payment receipt now
+              </button>
+            </p>
+          )}
+          {code === "PAYMENT_REJECTED" && (
+            <p className="mt-1.5 text-xs font-medium text-red-600">
+              Need help? Contact support on WhatsApp:{" "}
+              <a href="https://wa.me/2349133273608" target="_blank" rel="noopener noreferrer" className="underline">09133273608</a>
+            </p>
           )}
         </div>
       </div>
@@ -599,7 +629,26 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [statusError, setStatusError] = useState<{ code: string; message: string; lockoutMinutes?: number } | null>(null);
-
+  const [billingBlocked, setBillingBlocked] = useState<{
+    totalOwed: number;
+    unpaidMonths: string[];
+    tenantId: string;
+    tenantName: string;
+    monthlyAmount: number;
+    planName: string;
+    paymentAccounts: { bankName: string; accountNumber: string; accountName: string }[];
+    pendingReviewMonths: string[];
+    tenantPlan?: string;
+    planPriceNGN?: number;
+    planPriceUSD?: number;
+  } | null>(null);
+  const [billingReviewBlocked, setBillingReviewBlocked] = useState<{
+    totalPendingReview: number;
+    pendingReviewMonths: string[];
+    planName: string;
+    tenantId: string;
+    tenantName: string;
+  } | null>(null);
   // Dynamic plans from DB (replaces hardcoded PLANS)
   const [plans, setPlans] = useState(FALLBACK_PLANS);
 
@@ -680,23 +729,76 @@ export default function LoginPage() {
 
       // All known error codes → show via StatusMessage (not toast)
       if (code) {
+        // License payment not yet made — reuse the payment blocked page
+        if (code === "TENANT_PENDING_NO_EVIDENCE") {
+          setIsLoading(false);
+          setShowLoginModal(false);
+          setBillingBlocked({
+            totalOwed: (data.planPriceNGN as number) || 0,
+            unpaidMonths: ["license"],
+            tenantId: (data.tenantId as string) || "",
+            tenantName: (data.tenantName as string) || "",
+            monthlyAmount: 0,
+            planName: ((data.tenantPlan as string) || "").charAt(0).toUpperCase() + ((data.tenantPlan as string) || "").slice(1) + " Plan — Full License",
+            paymentAccounts: [],
+            pendingReviewMonths: [],
+            tenantPlan: (data.tenantPlan as string) || "",
+            planPriceNGN: (data.planPriceNGN as number) || 0,
+            planPriceUSD: (data.planPriceUSD as number) || 0,
+          });
+          return;
+        }
+        // Special handling for billing block → show pay & upload page
+        if (code === "MONTHLY_DUE_UNPAID") {
+          setIsLoading(false);
+          setShowLoginModal(false);
+          const billing = data.billing as Record<string, unknown> | undefined;
+          setBillingBlocked({
+            totalOwed: (billing?.totalOwed as number) || 0,
+            unpaidMonths: (billing?.unpaidMonths as string[]) || [],
+            tenantId: (data.tenantId as string) || "",
+            tenantName: (data.tenantName as string) || "",
+            monthlyAmount: (billing?.monthlyAmount as number) || 0,
+            planName: (billing?.planName as string) || "",
+            paymentAccounts: (billing?.paymentAccounts as { bankName: string; accountNumber: string; accountName: string }[]) || [],
+            pendingReviewMonths: (billing?.pendingReviewMonths as string[]) || [],
+          });
+          return;
+        }
+
+        if (code === "PAYMENT_PENDING_REVIEW") {
+          setIsLoading(false);
+          setShowLoginModal(false);
+          if (data.billing) {
+            const billing = data.billing as Record<string, unknown>;
+            setBillingReviewBlocked({
+              totalPendingReview: (billing.totalPendingReview as number) || 0,
+              pendingReviewMonths: (billing.pendingReviewMonths as string[]) || [],
+              planName: (billing.planName as string) || "",
+              tenantId: (data.tenantId as string) || "",
+              tenantName: (data.tenantName as string) || "",
+            });
+          } else {
+            setBillingReviewBlocked({
+              totalPendingReview: 0,
+              pendingReviewMonths: [],
+              planName: "",
+              tenantId: (data.tenantId as string) || "",
+              tenantName: (data.tenantName as string) || "",
+            });
+          }
+          return;
+        }
+
+        // Fallback for unrecognised errors — use HTTP status to give a clue
         setIsLoading(false);
-        setStatusError({
-          code,
-          message,
-          lockoutMinutes: (data.lockoutMinutes as number) || undefined,
-        });
+        if (res.status >= 500) {
+          setStatusError({ code: "SERVER_ERROR", message: "The server encountered an error. Please try again in a few moments." });
+        } else {
+          setStatusError({ code: "SERVER_ERROR", message });
+        }
         return;
       }
-
-      // Fallback for unrecognised errors — use HTTP status to give a clue
-      setIsLoading(false);
-      if (res.status >= 500) {
-        setStatusError({ code: "SERVER_ERROR", message: "The server encountered an error. Please try again in a few moments." });
-      } else {
-        setStatusError({ code: "SERVER_ERROR", message });
-      }
-      return;
     }
 
     // ---- Success ----
@@ -728,182 +830,188 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* NAVIGATION BAR */}
-      <motion.nav initial={{ y: -80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-lg">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-5 w-5" /></div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">CHYKSYS</span>
-          </div>
-          <div className="hidden items-center gap-6 md:flex">
-            <a href="/" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Homepage</a>
-            <button onClick={() => navigate("admission")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Admission</button>
-            <button onClick={() => navigate("register")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Register</button>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button size="sm" className="text-sm text-white" style={{ backgroundColor: "#C0522B" }} onClick={() => { setShowLoginModal(true); setStatusError(null); }}>Sign In <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
-          </div>
-        </div>
-      </motion.nav>
+    <>
+      {billingBlocked && <PaymentBlockedPage data={billingBlocked} onBack={() => setBillingBlocked(null)} onAllPaid={() => { setBillingBlocked(null); setShowLoginModal(true); }} />}
 
-      {/* HERO SECTION */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-orange-50/30" />
-        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "radial-gradient(circle, #C0522B 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-        <div className="relative mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 sm:py-20 lg:py-24">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-            <Badge variant="outline" className="mb-6 gap-2 border-orange-200 bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700"><span className="h-1.5 w-1.5 rounded-full bg-orange-500" /> Trusted by 500+ schools across Nigeria</Badge>
-            <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl" style={{ fontFamily: 'Georgia, serif' }}>The Complete <span className="relative"><span style={{ color: "#C0522B" }}>School Management</span><svg className="absolute -bottom-1 left-0 w-full" viewBox="0 0 200 8" fill="none"><path d="M2 6c40-4 80-4 120-2s60 2 76-2" stroke="#C0522B" strokeWidth="3" strokeLinecap="round" opacity="0.3" /></svg></span> Platform</h1>
-            <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600">Manage students, compute results, generate report cards, track admissions, and handle school finances — all in one powerful platform built for Nigerian schools.</p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button size="lg" className="h-12 px-8 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: "#C0522B" }} onClick={() => navigate("register")}>Get Started Free <ChevronRight className="ml-1 h-5 w-5" /></Button>
-              <Button size="lg" variant="outline" className="h-12 px-8 text-base font-semibold text-slate-700" onClick={() => { setShowLoginModal(true); setStatusError(null); }}>Sign In to Dashboard</Button>
+      {billingReviewBlocked && <PaymentReviewPendingPage data={billingReviewBlocked} onBack={() => setBillingReviewBlocked(null)} />}
+
+      {!billingBlocked && !billingReviewBlocked && <div className="min-h-screen bg-white">
+        {/* NAVIGATION BAR */}
+        <motion.nav initial={{ y: -80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-lg">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-5 w-5" /></div>
+              <span className="text-xl font-bold tracking-tight text-slate-900">CHYKSYS</span>
             </div>
-            <div className="mt-12 flex items-center justify-center gap-10 sm:gap-14">
-              {STATS.map((s) => (<div key={s.label} className="text-center"><p className="text-xl font-bold" style={{ color: "#C0522B" }}>{s.value}</p><p className="text-[11px] text-slate-500">{s.label}</p></div>))}
+            <div className="hidden items-center gap-6 md:flex">
+              <a href="/" className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Homepage</a>
+              <button onClick={() => navigate("admission")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Admission</button>
+              <button onClick={() => navigate("register")} className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900">Register</button>
             </div>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* CAROUSEL SECTION */}
-      <section className="relative bg-slate-50/50 px-4 pb-16 sm:px-6 lg:px-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.3 }} className="mx-auto max-w-6xl"><ImageCarousel /></motion.div>
-      </section>
-
-      {/* FEATURES SECTION */}
-      <section className="bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
-            <Badge variant="outline" className="mb-4 border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Everything You Need</Badge>
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Powerful Features for Every School</h2>
-            <p className="mt-4 text-base leading-relaxed text-slate-600">From student enrollment to result computation, CHYKSYS covers every aspect of school administration.</p>
-          </motion.div>
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feature, i) => { const Icon = feature.icon; return (<motion.div key={feature.title} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.05 }} className="group rounded-2xl border border-slate-100 bg-white p-6 transition-all duration-200 hover:border-slate-200 hover:shadow-lg"><div className="flex h-12 w-12 items-center justify-center rounded-xl ring-1 ring-slate-100 transition-colors group-hover:ring-slate-200" style={{ backgroundColor: "rgba(192,82,43,0.06)" }}><Icon className="h-6 w-6" style={{ color: "#C0522B" }} /></div><h3 className="mt-4 text-base font-semibold text-slate-900">{feature.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-500">{feature.desc}</p></motion.div>); })}
-          </div>
-        </div>
-      </section>
-
-      {/* WHY CHYKSYS */}
-      <section className="border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white py-20 sm:py-28">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Why Schools Choose CHYKSYS</h2>
-            <p className="mt-4 text-base text-slate-600">Built specifically for the Nigerian education system with features that matter most.</p>
-          </motion.div>
-          <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {[{ icon: Globe, title: "Cloud-Based", desc: "Access your school data from anywhere, on any device. No installations needed." }, { icon: Smartphone, title: "Mobile Friendly", desc: "Responsive design works perfectly on phones, tablets, and desktops." }, { icon: ShieldCheck, title: "Secure & Private", desc: "Each school's data is fully isolated. Enterprise-grade security." }, { icon: HeadphonesIcon, title: "24/7 Support", desc: "Get help whenever you need it. We're always here for you." }].map((item, i) => { const Icon = item.icon; return (<motion.div key={item.title} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.1 }} className="text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-100"><Icon className="h-6 w-6" style={{ color: "#C0522B" }} /></div><h3 className="mt-4 text-sm font-semibold text-slate-900">{item.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-500">{item.desc}</p></motion.div>); })}
-          </div>
-        </div>
-      </section>
-
-      {/* PRICING TIERS — now dynamic from database */}
-      <section className="bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
-            <Badge variant="outline" className="mb-4 border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">Simple Pricing</Badge>
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Choose the Right Plan for Your School</h2>
-            <p className="mt-4 text-base text-slate-600">Start free and scale as your school grows. No hidden fees, no surprises.</p>
-          </motion.div>
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {plans.map((plan, i) => {
-              const Icon = typeof plan.icon === "string" ? (ICON_MAP[plan.icon] || Zap) : plan.icon;
-              return (
-                <motion.div key={plan.id} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5, delay: i * 0.1 }} className={cn("relative flex flex-col overflow-hidden rounded-2xl border bg-white transition-shadow hover:shadow-xl", plan.popular ? "border-amber-300 ring-2 ring-amber-100" : "border-slate-200")}>
-                  {plan.popular && (<div className="absolute right-4 top-4"><Badge className="border-amber-500 bg-amber-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">MOST POPULAR</Badge></div>)}
-                  <div className="p-8">
-                    <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl", plan.popular ? "bg-amber-50" : "bg-slate-50")}><Icon className={cn("h-6 w-6", plan.popular ? "text-amber-600" : "text-slate-500")} /></div>
-                    <h3 className="mt-4 text-xl font-bold text-slate-900">{plan.name}</h3>
-                    <p className="mt-1 text-sm text-slate-500">{plan.subtitle}</p>
-                    <div className="mt-4 flex items-baseline gap-1"><span className="text-3xl font-extrabold text-slate-900">{plan.price}</span><span className="text-sm text-slate-400">{plan.period}</span></div>
-                  </div>
-                  <div className="flex-1 border-t border-slate-100 px-8 py-6"><ul className="space-y-3">{plan.features.map((f) => (<li key={f} className="flex items-start gap-2.5 text-sm text-slate-600"><Check className={cn("mt-0.5 h-4 w-4 shrink-0", plan.popular ? "text-amber-500" : "text-emerald-500")} /><span>{f}</span></li>))}</ul></div>
-                  <div className="border-t border-slate-100 px-8 py-6"><Button className={cn("w-full font-semibold", plan.popular ? "bg-amber-500 text-white hover:bg-amber-600" : plan.id === "free" ? "" : "border-slate-200 text-slate-700 hover:bg-slate-50")} variant={plan.id === "free" ? "default" : "outline"} onClick={() => navigate("register")}>{plan.cta} <ArrowRight className="ml-1.5 h-4 w-4" /></Button></div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA SECTION */}
-      <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-20 sm:py-28">
-        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-            <GraduationCap className="mx-auto h-12 w-12 text-white/20" />
-            <h2 className="mt-6 text-3xl font-bold text-white sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Ready to Transform Your School?</h2>
-            <p className="mt-4 text-base text-slate-400">Join hundreds of schools already using CHYKSYS to manage everything efficiently.</p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button size="lg" className="h-12 px-8 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: "#C0522B" }} onClick={() => navigate("register")}>Create Your School Account <ArrowRight className="ml-1.5 h-5 w-5" /></Button>
-              <Button size="lg" variant="outline" className="h-12 border-slate-600 px-8 text-base text-slate-300 hover:bg-white/5" onClick={() => navigate("admission")}>Admission Portal</Button>
+            <div className="flex items-center gap-3">
+              <Button size="sm" className="text-sm text-white" style={{ backgroundColor: "#C0522B" }} onClick={() => { setShowLoginModal(true); setStatusError(null); }}>Sign In <ArrowRight className="ml-1.5 h-4 w-4" /></Button>
             </div>
-          </motion.div>
-        </div>
-      </section>
+          </div>
+        </motion.nav>
 
-      {/* FOOTER */}
-      <footer className="border-t border-slate-100 bg-white py-12">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
-            <div className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-4 w-4" /></div><span className="text-sm font-semibold text-slate-900">CHYKSYS</span></div>
-            <div className="flex items-center gap-6 text-sm text-slate-500">
-              <a href="/" className="transition-colors hover:text-slate-700">Homepage</a>
-              <button onClick={() => navigate("admission")} className="transition-colors hover:text-slate-700">Admission</button>
-              <button onClick={() => navigate("register")} className="transition-colors hover:text-slate-700">Register</button>
-              <button onClick={() => { setShowLoginModal(true); setStatusError(null); }} className="transition-colors hover:text-slate-700">Sign In</button>
+        {/* HERO SECTION */}
+        <section className="relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-orange-50/30" />
+          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "radial-gradient(circle, #C0522B 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+          <div className="relative mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 sm:py-20 lg:py-24">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+              <Badge variant="outline" className="mb-6 gap-2 border-orange-200 bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700"><span className="h-1.5 w-1.5 rounded-full bg-orange-500" /> Trusted by 500+ schools across Nigeria</Badge>
+              <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl" style={{ fontFamily: 'Georgia, serif' }}>The Complete <span className="relative"><span style={{ color: "#C0522B" }}>School Management</span><svg className="absolute -bottom-1 left-0 w-full" viewBox="0 0 200 8" fill="none"><path d="M2 6c40-4 80-4 120-2s60 2 76-2" stroke="#C0522B" strokeWidth="3" strokeLinecap="round" opacity="0.3" /></svg></span> Platform</h1>
+              <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600">Manage students, compute results, generate report cards, track admissions, and handle school finances — all in one powerful platform built for Nigerian schools.</p>
+              <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                <Button size="lg" className="h-12 px-8 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: "#C0522B" }} onClick={() => navigate("register")}>Get Started Free <ChevronRight className="ml-1 h-5 w-5" /></Button>
+                <Button size="lg" variant="outline" className="h-12 px-8 text-base font-semibold text-slate-700" onClick={() => { setShowLoginModal(true); setStatusError(null); }}>Sign In to Dashboard</Button>
+              </div>
+              <div className="mt-12 flex items-center justify-center gap-10 sm:gap-14">
+                {STATS.map((s) => (<div key={s.label} className="text-center"><p className="text-xl font-bold" style={{ color: "#C0522B" }}>{s.value}</p><p className="text-[11px] text-slate-500">{s.label}</p></div>))}
+              </div>
+            </motion.div>
+          </div>
+        </section>
+
+        {/* CAROUSEL SECTION */}
+        <section className="relative bg-slate-50/50 px-4 pb-16 sm:px-6 lg:px-8">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.3 }} className="mx-auto max-w-6xl"><ImageCarousel /></motion.div>
+        </section>
+
+        {/* FEATURES SECTION */}
+        <section className="bg-white py-20 sm:py-28">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
+              <Badge variant="outline" className="mb-4 border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Everything You Need</Badge>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Powerful Features for Every School</h2>
+              <p className="mt-4 text-base leading-relaxed text-slate-600">From student enrollment to result computation, CHYKSYS covers every aspect of school administration.</p>
+            </motion.div>
+            <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {FEATURES.map((feature, i) => { const Icon = feature.icon; return (<motion.div key={feature.title} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.05 }} className="group rounded-2xl border border-slate-100 bg-white p-6 transition-all duration-200 hover:border-slate-200 hover:shadow-lg"><div className="flex h-12 w-12 items-center justify-center rounded-xl ring-1 ring-slate-100 transition-colors group-hover:ring-slate-200" style={{ backgroundColor: "rgba(192,82,43,0.06)" }}><Icon className="h-6 w-6" style={{ color: "#C0522B" }} /></div><h3 className="mt-4 text-base font-semibold text-slate-900">{feature.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-500">{feature.desc}</p></motion.div>); })}
             </div>
-            <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()} CHYKSYS. All rights reserved.</p>
           </div>
-          <div className="mt-8 text-center"><button onClick={() => setShowPasscode(true)} className="inline-flex items-center gap-1 text-[10px] text-slate-300 transition-colors hover:text-slate-400"><Shield className="h-3 w-3" /> Platform Admin</button></div>
-        </div>
-      </footer>
+        </section>
 
-      {/* LOGIN MODAL */}
-      <Dialog open={showLoginModal} onOpenChange={(open) => { setShowLoginModal(open); if (!open) setStatusError(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-5 w-5" /></div><div><DialogTitle className="text-xl">Welcome Back</DialogTitle><DialogDescription>Sign in to your school dashboard</DialogDescription></div></div>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="mt-2 space-y-4">
-            {statusError && <StatusMessage code={statusError.code} message={statusError.message} lockoutMinutes={statusError.lockoutMinutes} />}
-            <div className="space-y-2"><Label htmlFor="email">Email or Reg Number</Label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="email" type="text" placeholder="admin@school.com" value={email} onChange={(e) => { setEmail(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
-            <div className="space-y-2"><Label htmlFor="password">Password</Label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => { setPassword(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
-            <Button type="submit" className="w-full text-white" style={{ backgroundColor: "#C0522B" }} disabled={isLoading}>{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in...</> : "Sign In"}</Button>
-          </form>
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <button type="button" onClick={() => { navigate("register"); setShowLoginModal(false); }} className="font-medium transition-colors hover:underline" style={{ color: "#C0522B" }}>Don&apos;t have an account?</button>
-            <button type="button" onClick={() => { setShowLoginModal(false); setShowForgotPassword(true); }} className="font-medium text-muted-foreground transition-colors hover:underline">Forgot Password?</button>
+        {/* WHY CHYKSYS */}
+        <section className="border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white py-20 sm:py-28">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Why Schools Choose CHYKSYS</h2>
+              <p className="mt-4 text-base text-slate-600">Built specifically for the Nigerian education system with features that matter most.</p>
+            </motion.div>
+            <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              {[{ icon: Globe, title: "Cloud-Based", desc: "Access your school data from anywhere, on any device. No installations needed." }, { icon: Smartphone, title: "Mobile Friendly", desc: "Responsive design works perfectly on phones, tablets, and desktops." }, { icon: ShieldCheck, title: "Secure & Private", desc: "Each school's data is fully isolated. Enterprise-grade security." }, { icon: HeadphonesIcon, title: "24/7 Support", desc: "Get help whenever you need it. We're always here for you." }].map((item, i) => { const Icon = item.icon; return (<motion.div key={item.title} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.1 }} className="text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-100"><Icon className="h-6 w-6" style={{ color: "#C0522B" }} /></div><h3 className="mt-4 text-sm font-semibold text-slate-900">{item.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-500">{item.desc}</p></motion.div>); })}
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </section>
 
-      {/* FORGOT PASSWORD DIALOG */}
-      {showForgotPassword && (
-        <ForgotPasswordDialog
-          onClose={() => setShowForgotPassword(false)}
-          onBackToLogin={() => { setShowForgotPassword(false); setShowLoginModal(true); }}
-        />
-      )}
+        {/* PRICING TIERS — now dynamic from database */}
+        <section className="bg-white py-20 sm:py-28">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mx-auto max-w-2xl text-center">
+              <Badge variant="outline" className="mb-4 border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">Simple Pricing</Badge>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Choose the Right Plan for Your School</h2>
+              <p className="mt-4 text-base text-slate-600">Start free and scale as your school grows. No hidden fees, no surprises.</p>
+            </motion.div>
+            <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {plans.map((plan, i) => {
+                const Icon = typeof plan.icon === "string" ? (ICON_MAP[plan.icon] || Zap) : plan.icon;
+                return (
+                  <motion.div key={plan.id} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5, delay: i * 0.1 }} className={cn("relative flex flex-col overflow-hidden rounded-2xl border bg-white transition-shadow hover:shadow-xl", plan.popular ? "border-amber-300 ring-2 ring-amber-100" : "border-slate-200")}>
+                    {plan.popular && (<div className="absolute right-4 top-4"><Badge className="border-amber-500 bg-amber-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">MOST POPULAR</Badge></div>)}
+                    <div className="p-8">
+                      <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl", plan.popular ? "bg-amber-50" : "bg-slate-50")}><Icon className={cn("h-6 w-6", plan.popular ? "text-amber-600" : "text-slate-500")} /></div>
+                      <h3 className="mt-4 text-xl font-bold text-slate-900">{plan.name}</h3>
+                      <p className="mt-1 text-sm text-slate-500">{plan.subtitle}</p>
+                      <div className="mt-4 flex items-baseline gap-1"><span className="text-3xl font-extrabold text-slate-900">{plan.price}</span><span className="text-sm text-slate-400">{plan.period}</span></div>
+                    </div>
+                    <div className="flex-1 border-t border-slate-100 px-8 py-6"><ul className="space-y-3">{plan.features.map((f) => (<li key={f} className="flex items-start gap-2.5 text-sm text-slate-600"><Check className={cn("mt-0.5 h-4 w-4 shrink-0", plan.popular ? "text-amber-500" : "text-emerald-500")} /><span>{f}</span></li>))}</ul></div>
+                    <div className="border-t border-slate-100 px-8 py-6"><Button className={cn("w-full font-semibold", plan.popular ? "bg-amber-500 text-white hover:bg-amber-600" : plan.id === "free" ? "" : "border-slate-200 text-slate-700 hover:bg-slate-50")} variant={plan.id === "free" ? "default" : "outline"} onClick={() => navigate("register")}>{plan.cta} <ArrowRight className="ml-1.5 h-4 w-4" /></Button></div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
-      {/* PASSCODE VERIFICATION */}
-      {showPasscode && !showDevLogin && (<PasscodeDialog onSuccess={() => { setShowPasscode(false); setShowDevLogin(true); }} onClose={() => setShowPasscode(false)} />)}
+        {/* CTA SECTION */}
+        <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 py-20 sm:py-28">
+          <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
+            <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
+              <GraduationCap className="mx-auto h-12 w-12 text-white/20" />
+              <h2 className="mt-6 text-3xl font-bold text-white sm:text-4xl" style={{ fontFamily: 'Georgia, serif' }}>Ready to Transform Your School?</h2>
+              <p className="mt-4 text-base text-slate-400">Join hundreds of schools already using CHYKSYS to manage everything efficiently.</p>
+              <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                <Button size="lg" className="h-12 px-8 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: "#C0522B" }} onClick={() => navigate("register")}>Create Your School Account <ArrowRight className="ml-1.5 h-5 w-5" /></Button>
+                <Button size="lg" variant="outline" className="h-12 border-slate-600 px-8 text-base text-slate-300 hover:bg-white/5" onClick={() => navigate("admission")}>Admission Portal</Button>
+              </div>
+            </motion.div>
+          </div>
+        </section>
 
-      {/* DEVELOPER LOGIN DIALOG */}
-      <Dialog open={showDevLogin} onOpenChange={setShowDevLogin}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5" /> Platform Admin Login</DialogTitle>
-            <DialogDescription>Enter your developer credentials to access the platform dashboard.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleDevLogin} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="devEmail">Developer Email</Label><Input id="devEmail" type="email" placeholder="admin@CHYKSYShool.ng" value={devEmail} onChange={(e) => setDevEmail(e.target.value)} required /></div>
-            <div className="space-y-2"><Label htmlFor="devPassword">Password</Label><Input id="devPassword" type="password" placeholder="Developer password" value={devPassword} onChange={(e) => setDevPassword(e.target.value)} required /></div>
-            <Button type="submit" className="w-full text-white" style={{ backgroundColor: "#C0522B" }} disabled={devLoading}>{devLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Authenticating...</> : "Access Dashboard"}</Button>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>
+        {/* FOOTER */}
+        <footer className="border-t border-slate-100 bg-white py-12">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
+              <div className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-4 w-4" /></div><span className="text-sm font-semibold text-slate-900">CHYKSYS</span></div>
+              <div className="flex items-center gap-6 text-sm text-slate-500">
+                <a href="/" className="transition-colors hover:text-slate-700">Homepage</a>
+                <button onClick={() => navigate("admission")} className="transition-colors hover:text-slate-700">Admission</button>
+                <button onClick={() => navigate("register")} className="transition-colors hover:text-slate-700">Register</button>
+                <button onClick={() => { setShowLoginModal(true); setStatusError(null); }} className="transition-colors hover:text-slate-700">Sign In</button>
+              </div>
+              <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()} CHYKSYS. All rights reserved.</p>
+            </div>
+            <div className="mt-8 text-center"><button onClick={() => setShowPasscode(true)} className="inline-flex items-center gap-1 text-[10px] text-slate-300 transition-colors hover:text-slate-400"><Shield className="h-3 w-3" /> Platform Admin</button></div>
+          </div>
+        </footer>
+
+        {/* LOGIN MODAL */}
+        <Dialog open={showLoginModal} onOpenChange={(open) => { setShowLoginModal(open); if (!open) setStatusError(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ backgroundColor: "#C0522B" }}><GraduationCap className="h-5 w-5" /></div><div><DialogTitle className="text-xl">Welcome Back</DialogTitle><DialogDescription>Sign in to your school dashboard</DialogDescription></div></div>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="mt-2 space-y-4">
+              {statusError && <StatusMessage code={statusError.code} message={statusError.message} lockoutMinutes={statusError.lockoutMinutes} />}
+              <div className="space-y-2"><Label htmlFor="email">Email or Reg Number</Label><div className="relative"><Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="email" type="text" placeholder="admin@school.com" value={email} onChange={(e) => { setEmail(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
+              <div className="space-y-2"><Label htmlFor="password">Password</Label><div className="relative"><Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => { setPassword(e.target.value); setStatusError(null); }} required className="pl-10" /></div></div>
+              <Button type="submit" className="w-full text-white" style={{ backgroundColor: "#C0522B" }} disabled={isLoading}>{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in...</> : "Sign In"}</Button>
+            </form>
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <button type="button" onClick={() => { navigate("register"); setShowLoginModal(false); }} className="font-medium transition-colors hover:underline" style={{ color: "#C0522B" }}>Don&apos;t have an account?</button>
+              <button type="button" onClick={() => { setShowLoginModal(false); setShowForgotPassword(true); }} className="font-medium text-muted-foreground transition-colors hover:underline">Forgot Password?</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* FORGOT PASSWORD DIALOG */}
+        {showForgotPassword && (
+          <ForgotPasswordDialog
+            onClose={() => setShowForgotPassword(false)}
+            onBackToLogin={() => { setShowForgotPassword(false); setShowLoginModal(true); }}
+          />
+        )}
+
+        {/* PASSCODE VERIFICATION */}
+        {showPasscode && !showDevLogin && (<PasscodeDialog onSuccess={() => { setShowPasscode(false); setShowDevLogin(true); }} onClose={() => setShowPasscode(false)} />)}
+
+        {/* DEVELOPER LOGIN DIALOG */}
+        <Dialog open={showDevLogin} onOpenChange={setShowDevLogin}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5" /> Platform Admin Login</DialogTitle>
+              <DialogDescription>Enter your developer credentials to access the platform dashboard.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleDevLogin} className="space-y-4">
+              <div className="space-y-2"><Label htmlFor="devEmail">Developer Email</Label><Input id="devEmail" type="email" placeholder="admin@CHYKSYShool.ng" value={devEmail} onChange={(e) => setDevEmail(e.target.value)} required /></div>
+              <div className="space-y-2"><Label htmlFor="devPassword">Password</Label><Input id="devPassword" type="password" placeholder="Developer password" value={devPassword} onChange={(e) => setDevPassword(e.target.value)} required /></div>
+              <Button type="submit" className="w-full text-white" style={{ backgroundColor: "#C0522B" }} disabled={devLoading}>{devLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Authenticating...</> : "Access Dashboard"}</Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>}
+    </>
   );
 }

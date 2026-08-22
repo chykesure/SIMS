@@ -81,6 +81,11 @@ const statusConfig: Record<string, { label: string; className: string; icon: Rea
     className: 'bg-amber-100 text-amber-700 border-amber-200',
     icon: Clock,
   },
+  active: {
+    label: 'Active',
+    className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    icon: CheckCircle2,
+  },
   approved: {
     label: 'Approved',
     className: 'bg-emerald-100 text-emerald-700 border-emerald-200',

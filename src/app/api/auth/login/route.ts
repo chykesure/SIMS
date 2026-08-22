@@ -43,13 +43,13 @@ export async function POST(request: Request) {
     }
 
     // Find user by email (also support regNo for student login)
-    const tenantId = request.headers.get("x-tenant-id") || "";
     let user = await db.user.findFirst({
-      where: tenantId ? { email: sanitizedEmail, tenantId } : { email: sanitizedEmail },
+      where: { email: sanitizedEmail },
     });
 
     // If not found by email, try looking up a student by regNo and match their user
     if (!user) {
+      const tenantId = request.headers.get("x-tenant-id");
 
       // Try to find student by regNo
       const student = tenantId
@@ -74,11 +74,10 @@ export async function POST(request: Request) {
           user = existingUser;
         } else {
           // AUTO-CREATE: If student exists but no User account, create one
-          // Match the same format used in students/route.ts: strip slashes & lowercase
           const defaultPassword = student.regNo.replace(/[/\\s]/g, "").toLowerCase();
 
           // Only auto-create if the password matches the default
-          if (sanitizedPassword.toLowerCase() === defaultPassword) {
+          if (sanitizedPassword === defaultPassword) {
             const hashedPassword = await bcrypt.hash(defaultPassword, 10);
             user = await db.user.create({
               data: {
@@ -122,28 +121,27 @@ export async function POST(request: Request) {
       );
     }
 
-    // Password verification using bcrypt (with legacy plain text fallback)
-    // For students, normalize the password the same way default passwords are generated:
-    // strip slashes/spaces and lowercase. Accept both the raw regNo and the stripped form.
-    const normalizedStudentPassword = sanitizedPassword.replace(/[/\\s]/g, "").toLowerCase();
-    const inputPassword = user.role === "Student"
-      ? sanitizedPassword.toLowerCase()
-      : sanitizedPassword;
-
+    // ─── Password verification (supports both bcrypt and legacy plain text) ───
+    const isStudent = user.role.toLowerCase() === "student";
     let passwordValid = false;
+
     if (user.password.startsWith("$2")) {
-      // bcrypt hash — try both raw and stripped forms for students
-      if (user.role === "Student") {
-        passwordValid = await bcrypt.compare(inputPassword, user.password)
-          || await bcrypt.compare(normalizedStudentPassword, user.password);
+      // bcrypt hash
+      if (isStudent) {
+        const strippedForm = sanitizedPassword.replace(/[/\\s]/g, "").toLowerCase();
+        passwordValid =
+          (await bcrypt.compare(sanitizedPassword.toLowerCase(), user.password)) ||
+          (await bcrypt.compare(strippedForm, user.password));
       } else {
-        passwordValid = await bcrypt.compare(inputPassword, user.password);
+        passwordValid = await bcrypt.compare(sanitizedPassword, user.password);
       }
     } else {
-      // Legacy plain text fallback
-      if (user.role === "Student") {
-        passwordValid = user.password.toLowerCase() === inputPassword
-          || user.password.toLowerCase() === normalizedStudentPassword;
+      // Legacy plain text
+      if (isStudent) {
+        const strippedForm = sanitizedPassword.replace(/[/\\s]/g, "").toLowerCase();
+        passwordValid =
+          user.password.toLowerCase() === sanitizedPassword.toLowerCase() ||
+          user.password.toLowerCase() === strippedForm;
       } else {
         passwordValid = user.password === sanitizedPassword;
       }
@@ -172,16 +170,89 @@ export async function POST(request: Request) {
       );
     }
 
-    // CHECK TENANT STATUS — Block login if not approved
+    // ⛔ CHECK TENANT STATUS — Block login if not approved
     if (tenant.status === "pending") {
-      return NextResponse.json(
-        {
+      // ─── Check if tenant has uploaded payment evidence ───────────
+      try {
+        const evidence = await db.paymentEvidence.findFirst({
+          where: { tenantId: tenant.id },
+          select: { id: true, status: true },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (!evidence) {
+          // ─── Fetch plan price so the payment page can show it ────────
+          let planPriceNGN = 0;
+          let planPriceUSD = 0;
+          try {
+            const planRow = await db.$queryRawUnsafe<Array<{ priceNGN: number; priceUSD: number }>>(
+              `SELECT "priceNGN", "priceUSD" FROM "SubscriptionPlan" WHERE "planKey" = $1 AND "isActive" = true`,
+              tenant.plan
+            );
+            if (planRow.length > 0) {
+              planPriceNGN = Number(planRow[0].priceNGN) || 0;
+              planPriceUSD = Number(planRow[0].priceUSD) || 0;
+            }
+          } catch (e) {
+            console.error("[LOGIN] Failed to fetch plan price:", e);
+          }
+
+          // No evidence uploaded at all — redirect to upload
+          return NextResponse.json({
+            success: false,
+            message: "Your school account is pending payment verification. Please upload your payment receipt to proceed.",
+            code: "TENANT_PENDING_NO_EVIDENCE",
+            tenantId: tenant.id,
+            tenantName: tenant.name,
+            tenantEmail: user.email,
+            tenantPlan: tenant.plan,
+            tenantStatus: tenant.status,
+            planPriceNGN,
+            planPriceUSD,
+            tenantMaxStudents: tenant.maxStudents,
+          }, { status: 403 });
+        }
+
+        if (evidence.status === "pending") {
+          // Evidence uploaded but not yet reviewed
+          return NextResponse.json({
+            success: false,
+            message: "Your payment receipt is being reviewed by our Cloud Engineer. This typically takes 24–48 hours. You will receive a confirmation email once approved.",
+            code: "PAYMENT_PENDING_REVIEW",
+          }, { status: 403 });
+        }
+
+        if (evidence.status === "rejected") {
+          return NextResponse.json({
+            success: false,
+            message: "Your payment evidence was rejected. Please contact support or upload a new receipt.",
+            code: "PAYMENT_REJECTED",
+          }, { status: 403 });
+        }
+
+        // If evidence is verified, activate tenant and let them log in
+        if (evidence.status === "verified") {
+          await db.tenant.update({
+            where: { id: tenant.id },
+            data: { status: "active" },
+          });
+          // Don't return — fall through to the normal login flow below
+        } else {
+          return NextResponse.json({
+            success: false,
+            message: "Your school account is still pending approval. Please wait for the administrator to review and approve your registration.",
+            code: "TENANT_PENDING",
+          }, { status: 403 });
+        }
+      } catch (evidenceErr) {
+        console.error("Evidence check error:", evidenceErr);
+        // Fallback to original message if evidence check fails
+        return NextResponse.json({
           success: false,
           message: "Your school account is still pending approval. Please wait for the administrator to review and approve your registration.",
           code: "TENANT_PENDING",
-        },
-        { status: 403 }
-      );
+        }, { status: 403 });
+      }
     }
 
     if (tenant.status === "rejected") {
@@ -206,6 +277,86 @@ export async function POST(request: Request) {
         },
         { status: 403 }
       );
+    }
+
+    // ─── Check monthly maintenance dues ───
+    // Skip for students and superadmins — only check school admin/teacher/parent
+    if (user.role !== "STUDENT" && user.role !== "SUPERADMIN" && tenant.id) {
+      try {
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        // Run all queries in parallel instead of sequentially
+        const [plan, unpaidDues, paidDuesUnreviewed, paymentMod] = await Promise.all([
+          db.subscriptionPlan.findUnique({ where: { planKey: tenant.plan } }).catch(() => null),
+          db.monthlyDue.findMany({
+            where: {
+              tenantId: tenant.id,
+              month: { lte: currentMonth },
+              status: { in: ["unpaid", "overdue"] },
+            },
+          }),
+          db.monthlyDue.findMany({
+            where: {
+              tenantId: tenant.id,
+              month: { lte: currentMonth },
+              status: "paid",
+            },
+          }).then(dues => dues.filter(d => !d.reviewedBy)),
+          import("@/lib/payment-accounts").catch(() => ({ PAYMENT_ACCOUNTS: [] })),
+        ]);
+        const PAYMENT_ACCOUNTS = paymentMod.PAYMENT_ACCOUNTS;
+
+        const planName = plan?.name || tenant.plan || "Unknown";
+        const monthlyAmount = plan?.monthlyDueNGN ?? 0;
+
+        // CASE 1: Evidence uploaded but not yet reviewed — soft block, just inform
+        if (unpaidDues.length === 0 && paidDuesUnreviewed.length > 0) {
+          const totalPending = paidDuesUnreviewed.reduce((s, d) => s + d.amount, 0);
+          return NextResponse.json(
+            {
+              success: false,
+              message: `Your payment evidence for ${paidDuesUnreviewed.length} month(s) totalling ₦${Number(totalPending).toLocaleString()} has been received and is currently being verified by our team. You will regain access once verification is complete. If this takes more than 24 hours, please contact support on WhatsApp: 09133273608.`,
+              code: "PAYMENT_PENDING_REVIEW",
+              tenantId: user.tenantId,
+              tenantName: tenant.name,
+              billing: {
+                blockType: "pending_review",
+                totalPendingReview: totalPending,
+                pendingReviewMonths: paidDuesUnreviewed.map(d => d.month),
+                planName,
+              },
+            },
+            { status: 403 }
+          );
+        }
+
+        // CASE 2: Has unpaid months (no evidence uploaded) — show account details page
+        if (unpaidDues.length > 0) {
+          const totalOwed = unpaidDues.reduce((s, d) => s + d.amount, 0);
+          return NextResponse.json(
+            {
+              success: false,
+              message: `Your school has ${unpaidDues.length} outstanding monthly maintenance due(s) totalling ₦${Number(totalOwed).toLocaleString()}. Please make payment and upload your evidence to continue.`,
+              code: "MONTHLY_DUE_UNPAID",
+              tenantId: user.tenantId,
+              tenantName: tenant.name,
+              billing: {
+                blockType: "unpaid",
+                totalOwed,
+                unpaidMonths: unpaidDues.map(d => d.month),
+                monthlyAmount: unpaidDues[0]?.amount || monthlyAmount,
+                planName,
+                paymentAccounts: PAYMENT_ACCOUNTS,
+                pendingReviewMonths: paidDuesUnreviewed.map(d => d.month),
+              },
+            },
+            { status: 403 }
+          );
+        }
+      } catch {
+        // Billing check failed — don't block login
+      }
     }
 
     // ---- Security: Log successful login ----

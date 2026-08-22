@@ -70,11 +70,11 @@ export async function POST(request: Request) {
       note?: string;
     };
 
-    if (!targetPlan || !["basic", "premium"].includes(targetPlan)) {
+    if (!targetPlan || typeof targetPlan !== "string" || targetPlan.trim() === "") {
       return NextResponse.json(
         {
           success: false,
-          message: "targetPlan is required and must be 'basic' or 'premium'",
+          message: "targetPlan is required",
         },
         { status: 400 }
       );

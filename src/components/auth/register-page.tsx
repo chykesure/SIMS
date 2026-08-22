@@ -128,6 +128,7 @@ function getRecommendedPlanFromDB(count: number, plans: DBPlan[]): RecommendedPl
 
 export default function RegisterPage() {
   const setPendingSchoolName = useAppStore((s) => s.setPendingSchoolName);
+  const setRegistrationData = useAppStore((s) => s.setRegistrationData);
   const navigate = useAppStore((s) => s.navigate);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,6 +152,7 @@ export default function RegisterPage() {
   const [logoUrl, setLogoUrl] = useState("");
   const [studentCount, setStudentCount] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // ─── Fetch plans from DB on mount ─────────────────────────────────
   const [dbPlans, setDbPlans] = useState<DBPlan[]>([]);
@@ -265,15 +267,43 @@ export default function RegisterPage() {
 
       const data = await res.json();
 
-      if (!res.ok) {
+            if (!res.ok) {
         throw new Error(data.error || data.message || "Registration failed");
       }
 
-      toast.success("Registration submitted!", {
-        description: "Your school account is pending Cloud Engineer approval for Security & Cloud Storage.",
+      // ─── Determine plan price (try server response first, then local plans) ──
+      let amountNGN = data.planPriceNGN as number || 0;
+      let amountUSD = data.planPriceUSD as number || 0;
+      const planKey = (data.tenant?.plan as string) || "basic";
+
+      // Fallback: if server didn't return price, use local dbPlans
+      if (amountNGN === 0 && dbPlans.length > 0) {
+        const studentNum = Number(studentCount) || 0;
+        const match = dbPlans
+          .filter((p) => studentNum <= p.maxStudents)
+          .sort((a, b) => a.maxStudents - b.maxStudents)[0] || dbPlans[dbPlans.length - 1];
+        amountNGN = match?.priceNGN || 0;
+        amountUSD = match?.priceUSD || 0;
+      }
+
+      // ─── Store registration data for the payment upload page ───────
+      setRegistrationData({
+        tenantId: data.tenant?.id || "",
+        tenantName: schoolName,
+        plan: planKey,
+        amountNGN,
+        amountUSD,
+        adminEmail: adminEmail,
+        studentCount: Number(studentCount) || 0,
       });
 
       setPendingSchoolName(schoolName);
+
+      toast.success("Registration submitted!", {
+        description: "Please upload your payment receipt to activate your account.",
+      });
+
+      navigate("payment-upload");
     } catch (err) {
       toast.error("Registration failed", {
         description: err instanceof Error ? err.message : "An unexpected error occurred",
@@ -797,6 +827,168 @@ export default function RegisterPage() {
           </div>
         </motion.div>
       </div>
+      {/* ===== SUCCESS OVERLAY ===== */}
+      {showSuccess && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        >
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0, y: 30 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4, type: "spring", stiffness: 200, damping: 20 }}
+            className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl"
+          >
+            {/* Animated checkmark circle */}
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.3, type: "spring", stiffness: 250, damping: 15 }}
+              className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-green-500 shadow-lg"
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -45 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ delay: 0.5, duration: 0.4, type: "spring", stiffness: 200, damping: 12 }}
+              >
+                <svg className="h-12 w-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </motion.div>
+            </motion.div>
+
+            {/* Confetti dots decoration */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.4, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ top: "8%", left: "10%", width: 8, height: 8, backgroundColor: "#C0522B" }}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.5, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ top: "12%", right: "15%", width: 6, height: 6, backgroundColor: "#f59e0b" }}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.6, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ bottom: "15%", left: "20%", width: 10, height: 10, backgroundColor: "#3b82f6" }}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.45, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ bottom: "10%", right: "10%", width: 7, height: 7, backgroundColor: "#10b981" }}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.55, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ top: "30%", left: "5%", width: 5, height: 5, backgroundColor: "#8b5cf6" }}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0, y: 20 }}
+                animate={{ opacity: 0.6, scale: 1, y: -10 }}
+                transition={{ delay: 0.65, duration: 0.5 }}
+                className="absolute rounded-full"
+                style={{ top: "25%", right: "8%", width: 9, height: 9, backgroundColor: "#ec4899" }}
+              />
+            </div>
+
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5, duration: 0.3 }}
+              className="text-2xl font-bold text-slate-900"
+            >
+              Congratulations! 🎉
+            </motion.h2>
+
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6, duration: 0.3 }}
+              className="mt-3 text-sm leading-relaxed text-slate-600"
+            >
+              Your school <span className="font-bold text-slate-900">{schoolName}</span> has been
+              registered successfully! Your account is now pending Cloud Engineer approval for
+              Security &amp; Cloud Storage.
+            </motion.p>
+
+            {/* Info card */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7, duration: 0.3 }}
+              className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100">
+                  <Clock className="h-4 w-4 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-amber-800">What's Next?</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                    Our Cloud Engineer will review and activate your account within 24–48 hours.
+                    You'll receive a confirmation email at <strong>{adminEmail}</strong>.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Email notice */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.8, duration: 0.3 }}
+              className="mt-3 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-left"
+            >
+              <Mail className="h-4 w-4 shrink-0 text-blue-500" />
+              <p className="text-xs text-blue-700">
+                A confirmation email has been sent to <strong>{adminEmail}</strong>.
+              </p>
+            </motion.div>
+
+            {/* Action buttons */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9, duration: 0.3 }}
+              className="mt-6 flex flex-col gap-3"
+            >
+              <button
+                onClick={() => {
+                  setShowSuccess(false);
+                  navigate("pending-approval");
+                }}
+                className="w-full rounded-xl py-3.5 text-sm font-semibold text-white transition-all hover:opacity-90"
+                style={{ backgroundColor: "#C0522B" }}
+              >
+                Continue to Dashboard
+              </button>
+              <button
+                onClick={() => {
+                  setShowSuccess(false);
+                  navigate("login");
+                }}
+                className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
+              >
+                Back to Sign In
+              </button>
+            </motion.div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }

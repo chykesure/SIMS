@@ -57,6 +57,7 @@ interface PlanData {
   validityDays: number
   maxStudents: number
   maxUsers: number
+  monthlyDueNGN: number
   features: string[]
   isActive: boolean
   sortOrder: number
@@ -73,6 +74,7 @@ interface EditablePlan {
   validityDays: string
   maxStudents: string
   maxUsers: string
+  monthlyDueNGN: string
   features: string[]
   isActive: boolean
 }
@@ -158,6 +160,7 @@ function planToEditable(plan: PlanData): EditablePlan {
     validityDays: String(plan.validityDays),
     maxStudents: plan.maxStudents >= 999999 ? '999999' : String(plan.maxStudents),
     maxUsers: String(plan.maxUsers),
+    monthlyDueNGN: String(plan.monthlyDueNGN || 0),
     features: [...plan.features],
     isActive: plan.isActive,
   }
@@ -389,6 +392,12 @@ function PlanRowView({
               value={plan.maxUsers.toString()}
               icon={UserCog}
               variant="staff"
+            />
+            <StatPill
+              label="Monthly Due"
+              value={plan.monthlyDueNGN > 0 ? `₦${formatCurrency(plan.monthlyDueNGN)}/mo` : 'None'}
+              icon={CalendarDays}
+              variant="ngn"
             />
             <StatPill
               label="Features"
@@ -626,6 +635,30 @@ function PlanRowEdit({
                 className="h-9 text-sm"
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <span className="inline-flex items-center justify-center h-5 w-5 rounded bg-amber-500 text-[10px] font-bold text-white">₦</span>
+                  Monthly Due (NGN)
+                </Label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="500"
+                    value={editData.monthlyDueNGN}
+                    onChange={(e) => onEditChange({ ...editData, monthlyDueNGN: e.target.value })}
+                    className="h-9 text-sm font-semibold border-amber-200 pl-7"
+                    placeholder="0"
+                  />
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500 font-semibold text-xs">₦</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Set 0 to disable monthly billing
+                </p>
+              </div>
+              <div /> {/* empty spacer to keep grid aligned */}
+            </div>
           </div>
         </div>
 
@@ -758,6 +791,7 @@ export function DevPlans() {
     const validityDays = Number(editData.validityDays)
     const maxStudents = Number(editData.maxStudents)
     const maxUsers = Number(editData.maxUsers)
+    const monthlyDueNGN = Number(editData.monthlyDueNGN) || 0
 
     if (isNaN(priceUSD) || priceUSD < 0) { toast.error('USD price must be valid'); return }
     if (isNaN(priceNGN) || priceNGN < 0) { toast.error('NGN price must be valid'); return }
@@ -781,6 +815,7 @@ export function DevPlans() {
             validityDays,
             maxStudents,
             maxUsers,
+            monthlyDueNGN,
             features: editData.features,
             isActive: editData.isActive,
           },
