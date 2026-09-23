@@ -1,49 +1,58 @@
+// src/app/api/upload/route.ts
+// Generic file upload endpoint (assignment attachments, student photos,
+// school logo, ...). Accepts multipart FormData with a "file" field,
+// stores the file base64 in the DB and returns its serving URL.
+// Response: { success: true, url: "/api/files/<id>" }
+
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
+    const tenantId = request.headers.get("x-tenant-id");
+    if (!tenantId) {
+      return NextResponse.json(
+        { success: false, message: "Tenant ID is required" },
+        { status: 400 }
+      );
+    }
 
-    if (!file) {
+    const formData = await request.formData();
+    const file = formData.get("file");
+
+    if (!file || !(file instanceof File)) {
       return NextResponse.json(
         { success: false, message: "No file provided" },
         { status: 400 }
       );
     }
 
-    // Validate file type
-    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
+    if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { success: false, message: "Only JPEG, PNG, GIF, and WebP images are allowed" },
+        { success: false, message: "File too large. Maximum size is 10MB." },
         { status: 400 }
       );
     }
 
-    // Validate file size (max 1MB for base64 storage)
-    if (file.size > 1 * 1024 * 1024) {
-      return NextResponse.json(
-        { success: false, message: "Image must be less than 1MB. Please compress and try again." },
-        { status: 400 }
-      );
-    }
-
-    // Convert to base64 data URL
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const base64 = buffer.toString("base64");
-    const dataUrl = `data:${file.type};base64,${base64}`;
-
-    return NextResponse.json({
-      success: true,
-      url: dataUrl,
-      message: "Photo uploaded successfully",
+    // Convert to base64 and store in the database
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const uploaded = await db.uploadedFile.create({
+      data: {
+        tenantId,
+        name: file.name || "file",
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        data: buffer.toString("base64"),
+      },
     });
+
+    return NextResponse.json({ success: true, url: `/api/files/${uploaded.id}` });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Upload failed";
+    const message = error instanceof Error ? error.message : "Unknown error occurred";
     return NextResponse.json(
-      { success: false, message: `Failed to upload photo: ${message}` },
+      { success: false, message: `Upload failed: ${message}` },
       { status: 500 }
     );
   }

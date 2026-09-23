@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     }
 
     const assignments = await db.assignment.findMany({
-      where: { tenantId, createdBy: user.teacherId },
+      where: { tenantId },
       orderBy: { createdAt: "desc" },
       include: {
         classroom: {

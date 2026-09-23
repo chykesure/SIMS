@@ -17,6 +17,48 @@ enum SystemRole {
   STAFF
 }
 
+// ==========================================
+// CBT ENGINE (Computer-Based Testing)
+// ==========================================
+
+enum CbtQuestionType {
+  MCQ
+  TRUE_FALSE
+}
+
+enum CbtExamStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum CbtAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+}
+
+// ==========================================
+// ATTENDANCE ENGINE
+// ==========================================
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum AttendanceMode {
+  MANUAL
+  QR_TEACHER
+  QR_STUDENT
+}
+
+enum AttendanceSessionStatus {
+  ACTIVE
+  CLOSED
+}
+
 model Tenant {
   id              String   @id @default(cuid())
   name            String
@@ -83,6 +125,14 @@ model Tenant {
   aiResources           AiResource[]
   teacherActivities     TeacherActivity[]
   lessonPlans           LessonPlan[]
+  cbtQuestions          CbtQuestion[]
+  cbtExams              CbtExam[]
+  cbtExamQuestions      CbtExamQuestion[]
+  cbtAttempts           CbtAttempt[]
+  cbtAnswers            CbtAnswer[]
+  attendanceSessions    AttendanceSession[]
+  attendanceRecords     AttendanceRecord[]
+  uploadedFiles         UploadedFile[]
 }
 
 // ==========================================
@@ -672,6 +722,23 @@ model Announcement {
   classroom Classroom @relation(fields: [classroomId], references: [id])
 }
 
+// ==========================================
+// FILE UPLOADS (assignment attachments, photos, logos)
+// Files are stored base64 in the DB and served via /api/files/[id]
+// ==========================================
+
+model UploadedFile {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  type      String   @default("")
+  size      Int      @default(0)
+  data      String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
 
 model Assignment {
   id            String   @id @default(cuid())
@@ -940,4 +1007,165 @@ model MonthlyDue {
   @@unique([tenantId, month]) // One due per school per month
   @@index([tenantId, status])
   @@index([status])
+}
+// ==========================================
+// CBT ENGINE (Computer-Based Testing)
+// ==========================================
+
+model CbtQuestion {
+  id           String          @id @default(cuid())
+  tenantId     String
+  subject      String          // matches Subject.name
+  class        String  @default("")   // class name string; "" = any class
+  type         CbtQuestionType @default(MCQ)
+  text         String
+  image        String  @default("")   // optional image (future: image-based questions)
+  options      Json            // ["2", "4", "6", "8"] — TRUE_FALSE uses ["True", "False"]
+  correctIndex Int             // 0-based index into options
+  marks        Int     @default(1)
+  explanation  String  @default("")   // shown after submission (optional)
+  createdBy    String  @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  examLinks CbtExamQuestion[]
+
+  @@index([tenantId, subject])
+  @@index([tenantId, class])
+}
+
+model CbtExam {
+  id               String         @id @default(cuid())
+  tenantId         String
+  title            String
+  description      String @default("")
+  subject          String
+  class            String
+  session          String         // e.g. "2025/2026"
+  term             String         // e.g. "First Term"
+  durationMinutes  Int
+  questionCount    Int    @default(0)    // questions each student receives; 0 = all linked questions
+  shuffleQuestions Boolean @default(true)
+  shuffleOptions   Boolean @default(false)
+  attemptsAllowed  Int    @default(1)
+  startsAt         DateTime
+  endsAt           DateTime
+  status           CbtExamStatus @default(DRAFT)
+  createdBy        String @default("")
+  createdByName    String @default("")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  questions CbtExamQuestion[]
+  attempts  CbtAttempt[]
+
+  @@index([tenantId, session, term])
+  @@index([tenantId, class])
+  @@index([tenantId, status])
+}
+
+model CbtExamQuestion {
+  id         String @id @default(cuid())
+  tenantId   String
+  examId     String
+  questionId String
+  order      Int    @default(0)
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  exam     CbtExam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question CbtQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, questionId])
+  @@index([examId])
+}
+
+model CbtAttempt {
+  id            String           @id @default(cuid())
+  tenantId      String
+  examId        String
+  studentId     String
+  studentName   String @default("")     // denormalized for teacher views
+  attemptNo     Int    @default(1)
+  paper         Json                   // served questions WITHOUT answers: [{ id, text, type, options[], marks }]
+  answerKey     Json                   // server-only: { [questionId]: { correctIndex, marks } }
+  startedAt     DateTime @default(now())
+  deadlineAt    DateTime               // server-enforced: startedAt + exam.durationMinutes
+  submittedAt   DateTime?
+  status        CbtAttemptStatus @default(IN_PROGRESS)
+  autoSubmitted Boolean  @default(false)
+  score         Float  @default(0)
+  totalMarks    Float  @default(0)
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  exam    CbtExam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers CbtAnswer[]
+
+  @@unique([examId, studentId, attemptNo])
+  @@index([tenantId, examId])
+  @@index([tenantId, studentId])
+}
+
+model CbtAnswer {
+  id            String  @id @default(cuid())
+  tenantId      String
+  attemptId     String
+  questionId    String
+  selectedIndex Int     @default(-1)   // -1 = unanswered
+  isCorrect     Boolean @default(false)
+  marksAwarded  Float   @default(0)
+  answeredAt    DateTime @default(now())
+
+  tenant  Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attempt CbtAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+// ==========================================
+// ATTENDANCE ENGINE
+// ==========================================
+
+model AttendanceSession {
+  id          String                  @id @default(cuid())
+  tenantId    String
+  class       String                          // class name string
+  subject     String  @default("")            // "" = daily class register
+  period      String  @default("")            // e.g. "1", "2"; "" = daily
+  date        DateTime @db.Date
+  mode        AttendanceMode          @default(MANUAL)
+  status      AttendanceSessionStatus @default(ACTIVE)
+  teacherId   String  @default("")            // Teacher.id
+  teacherName String  @default("")
+  secret      String  @default("")            // rotating-token secret (QR_STUDENT, Phase 3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  records AttendanceRecord[]
+
+  @@unique([tenantId, class, subject, period, date]) // one register per class/subject/period/day
+  @@index([tenantId, class, date])
+  @@index([tenantId, date])
+}
+
+model AttendanceRecord {
+  id          String           @id @default(cuid())
+  tenantId    String
+  sessionId   String
+  studentId   String
+  studentName String @default("")
+  status      AttendanceStatus @default(PRESENT)
+  method      AttendanceMode   @default(MANUAL)
+  markedBy    String @default("")      // userId of marker (teacher/self)
+  markedAt    DateTime @default(now())
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId]) // one mark per student per session
+  @@index([tenantId, sessionId])
+  @@index([tenantId, studentId])
 }

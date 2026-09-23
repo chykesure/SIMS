@@ -70,7 +70,11 @@ export type PageView =
   | "billing"
   | "payment-blocked"
   | "dev-monthly-dues"
-  | "attendance";
+  | "attendance"
+  | "cbt"
+  | "student-cbt"
+  | "teacher-cbt"
+  | "student-attendance";
 
 const VALID_PAGES = new Set<string>([
   "login", "register", "pending-approval", "payment-upload", "admission", "session-select",
@@ -92,6 +96,7 @@ const VALID_PAGES = new Set<string>([
   "billing", "payment-blocked",
   "parent-dashboard", "parent-results",
   "dev-monthly-dues",
+  "attendance", "cbt", "student-cbt", "teacher-cbt", "student-attendance",
 ]);
 
 interface User {

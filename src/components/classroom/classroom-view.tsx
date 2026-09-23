@@ -32,6 +32,8 @@ import {
   Send,
   Save,
   MessageSquare,
+  Paperclip,
+  X,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -115,6 +117,7 @@ interface Assignment {
   dueTime: string;
   maxScore: number;
   status: string;
+  attachmentUrl: string;
   createdAt: string;
   _count: {
     submissions: number;
@@ -321,6 +324,38 @@ export function ClassroomView() {
   const [assignDueDate, setAssignDueDate] = useState('');
   const [assignDueTime, setAssignDueTime] = useState('');
   const [assignMaxScore, setAssignMaxScore] = useState('100');
+  const [assignUploading, setAssignUploading] = useState(false);
+  const [assignFileUrl, setAssignFileUrl] = useState('');
+  const [assignFileName, setAssignFileName] = useState('');
+
+  // ─── Assignment File Upload ───
+  async function handleAssignFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File too large', { description: 'Maximum file size is 10MB' });
+      return;
+    }
+    setAssignUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (json.success && json.url) {
+        setAssignFileUrl(json.url);
+        setAssignFileName(file.name);
+        toast.success('File attached', { description: file.name });
+      } else {
+        toast.error(json.message || 'Upload failed');
+      }
+    } catch {
+      toast.error('Upload failed', { description: 'Network error' });
+    } finally {
+      setAssignUploading(false);
+      e.target.value = '';
+    }
+  }
 
   // Material dialog
   const [materialOpen, setMaterialOpen] = useState(false);
@@ -581,6 +616,7 @@ export function ClassroomView() {
           dueDate: assignDueDate,
           dueTime: assignDueTime,
           maxScore: parseFloat(assignMaxScore) || 100,
+          attachmentUrl: assignFileUrl,
         }),
       });
       const data = await res.json();
@@ -596,6 +632,8 @@ export function ClassroomView() {
       setAssignDueDate('');
       setAssignDueTime('');
       setAssignMaxScore('100');
+      setAssignFileUrl('');
+      setAssignFileName('');
       fetchAssignments(selectedClassroom.id);
       fetchClassrooms();
     } catch {
@@ -1215,6 +1253,16 @@ export function ClassroomView() {
                                   {assignment.description}
                                 </p>
                               )}
+                              {assignment.attachmentUrl && (
+                                <a
+                                  href={assignment.attachmentUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-sky-600 hover:underline"
+                                >
+                                  <Paperclip className="size-3" /> View attachment
+                                </a>
+                              )}
                               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                                 {assignment.dueDate && (
                                   <span className="flex items-center gap-1">
@@ -1583,6 +1631,38 @@ export function ClassroomView() {
                 placeholder="Detailed instructions for students"
                 rows={3}
               />
+            </div>
+            {/* Attachment */}
+            <div className="space-y-2">
+              <Label htmlFor="as-file">Attachment (optional)</Label>
+              {assignFileUrl ? (
+                <div className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <span className="flex min-w-0 items-center gap-2 text-sm">
+                    <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{assignFileName}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground transition-colors hover:text-destructive"
+                    onClick={() => { setAssignFileUrl(''); setAssignFileName(''); }}
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="as-file"
+                    type="file"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.zip"
+                    onChange={handleAssignFileSelect}
+                    disabled={assignUploading}
+                    className="text-sm"
+                  />
+                  {assignUploading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">PDF, Word, PowerPoint, Excel, images, ZIP — max 10MB</p>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">

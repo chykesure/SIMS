@@ -70,6 +70,7 @@
     "openai": "^6.45.0",
     "pg": "^8.20.0",
     "prisma": "^6.11.1",
+    "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-day-picker": "^9.8.0",
     "react-dom": "^19.0.0",

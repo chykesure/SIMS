@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       where: { id: userId, tenantId },
     });
 
-    if (!user || user.role !== "STUDENT" || !user.studentId) {
+    if (!user || (user.role || "").toUpperCase() !== "STUDENT" || !user.studentId) {
       return NextResponse.json(
         { success: false, message: "Access denied" },
         { status: 403 }
@@ -214,11 +214,11 @@ export async function GET(request: Request) {
         totalStudents: studentRecord?.totalStudents || classPosition?.totalStudents || 0,
         studentRecord: studentRecord
           ? {
-              attendance: studentRecord.attendance,
-              subjectsPassed: studentRecord.subjectsPassed,
-              subjectsFailed: studentRecord.subjectsFailed,
-              percentage: studentRecord.percentage,
-            }
+            attendance: studentRecord.attendance,
+            subjectsPassed: studentRecord.subjectsPassed,
+            subjectsFailed: studentRecord.subjectsFailed,
+            percentage: studentRecord.percentage,
+          }
           : null,
         availableFilters: distinctSessions.map(s => ({ session: s.session, term: s.term })),
       },

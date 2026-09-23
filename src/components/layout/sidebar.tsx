@@ -44,6 +44,7 @@ import {
   Package,
   Receipt,
   ClipboardCheck,
+  MonitorPlay,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -83,7 +84,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Subjects", page: "subjects", icon: BookOpen },
       { label: "Classes", page: "classes", icon: School },
       { label: "Sessions", page: "sessions", icon: Calendar },
-      { label: "Exams", page: "exams", icon: FileText },
+      { label: "CBT & Exams", page: "cbt", icon: MonitorPlay },
       { label: "Results", page: "results", icon: Award },
       { label: "Grading", page: "grading", icon: BarChart3 },
     ],
@@ -119,6 +120,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "Classroom",
     items: [{ label: "Classroom", page: "classroom", icon: DoorOpen }],
+  },
+  {
+    title: "Attendance",
+    items: [{ label: "Attendance", page: "attendance", icon: ClipboardCheck }],
   },
   {
     title: "Billing",

@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }
 
     const announcements = await db.announcement.findMany({
-      where: { tenantId, createdBy: user.teacherId },
+      where: { tenantId },
       orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
       include: {
         classroom: {

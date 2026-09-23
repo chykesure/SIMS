@@ -74,7 +74,6 @@ export async function PUT(
     );
   }
 }
-
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -85,9 +84,7 @@ export async function DELETE(
 
     if (!id) {
       return NextResponse.json(
-        { success: false, message: "Assignment ID is required" },
-        { status: 400 }
-      );
+        { success: false, message: "Assignment ID is required" }, { status: 400 });
     }
 
     const existing = await db.feeAssignment.findFirst({
@@ -96,27 +93,33 @@ export async function DELETE(
     });
     if (!existing) {
       return NextResponse.json(
-        { success: false, message: "Fee assignment not found" },
-        { status: 404 }
-      );
+        { success: false, message: "Fee assignment not found" }, { status: 404 });
     }
 
-    // Prevent deletion if payments exist
-    if (existing.payments.length > 0) {
+    // Prevent deletion if payments exist, unless force=true is passed
+    const force = new URL(request.url).searchParams.get("force") === "true";
+    if (existing.payments.length > 0 && !force) {
       return NextResponse.json(
         {
           success: false,
-          message: `Cannot delete assignment: it has ${existing.payments.length} payment(s) linked to it.`,
+          message: `Cannot delete assignment: it has ${existing.payments.length} payment(s) linked to it. Confirm force delete to remove them as well.`,
         },
         { status: 409 }
       );
     }
 
-    await db.feeAssignment.delete({ where: { id } });
+    await db.$transaction([
+      db.payment.deleteMany({ where: { assignmentId: id, tenantId } }),
+      db.feeAssignment.delete({ where: { id } }),
+    ]);
 
-    return NextResponse.json(
-      { success: true, message: "Fee assignment deleted successfully" }
-    );
+    return NextResponse.json({
+      success: true,
+      message:
+        existing.payments.length > 0
+          ? `Fee assignment and its ${existing.payments.length} linked payment(s) deleted successfully`
+          : "Fee assignment deleted successfully",
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
     return NextResponse.json(

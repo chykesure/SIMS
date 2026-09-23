@@ -22,6 +22,8 @@ import {
   PanelLeftOpen,
   KeyRound,
   Menu,
+  MonitorPlay,
+  ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -35,6 +37,8 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', page: 'student-dashboard', icon: LayoutDashboard },
+  { label: 'CBT & Tests', page: 'student-cbt', icon: MonitorPlay },
+  { label: 'My Attendance', page: 'student-attendance', icon: ClipboardCheck },
   { label: 'My Results', page: 'student-results', icon: Award },
   { label: 'My Assignments', page: 'student-assignments', icon: ClipboardList },
   { label: 'My Fees', page: 'student-fees', icon: Wallet },

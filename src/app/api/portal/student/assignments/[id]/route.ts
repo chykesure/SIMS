@@ -38,7 +38,7 @@ export async function POST(
       where: { id: userId, tenantId },
     });
 
-    if (!user || user.role !== "STUDENT" || !user.studentId) {
+    if (!user || (user.role || "").toUpperCase() !== "STUDENT" || !user.studentId) {
       return NextResponse.json(
         { success: false, message: "Access denied" },
         { status: 403 }

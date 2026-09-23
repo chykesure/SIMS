@@ -28,8 +28,10 @@ import {
   Loader2,
   BookOpen,
   Filter,
+  Paperclip,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ClassroomMaterials } from '@/components/classroom/classroom-materials'
 
 interface AssignmentSubmission {
   id: string
@@ -46,6 +48,7 @@ interface Assignment {
   title: string
   description: string
   instructions: string
+  attachmentUrl: string
   dueDate: string
   dueTime: string
   maxScore: number
@@ -200,6 +203,9 @@ export function StudentAssignments() {
           View and submit your assignments
         </p>
       </div>
+
+      {/* Class materials shared from the admin Classroom module */}
+      <ClassroomMaterials />
 
       {/* Stats */}
       {!loading && (
@@ -396,6 +402,19 @@ export function StudentAssignments() {
                 </div>
               )}
 
+              {/* Attachment */}
+              {selectedAssignment.attachmentUrl && (
+                <a
+                  href={selectedAssignment.attachmentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-sky-600 transition-colors hover:bg-muted/60"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  View assignment attachment
+                </a>
+              )}
+              
               {/* Submission Status */}
               {selectedAssignment.submitted && (
                 <div className="rounded-lg bg-muted/50 p-3">

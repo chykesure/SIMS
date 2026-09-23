@@ -78,9 +78,7 @@ export async function DELETE(
 
     if (!id) {
       return NextResponse.json(
-        { success: false, message: "Fee type ID is required" },
-        { status: 400 }
-      );
+        { success: false, message: "Fee type ID is required" }, { status: 400 });
     }
 
     const existing = await db.feeType.findFirst({
@@ -89,27 +87,39 @@ export async function DELETE(
     });
     if (!existing) {
       return NextResponse.json(
-        { success: false, message: "Fee type not found" },
-        { status: 404 }
-      );
+        { success: false, message: "Fee type not found" }, { status: 404 });
     }
 
-    // Prevent deletion if assignments exist
-    if (existing.assignments.length > 0) {
+    // Prevent deletion if assignments exist, unless force=true is passed
+    const force = new URL(request.url).searchParams.get("force") === "true";
+    if (existing.assignments.length > 0 && !force) {
       return NextResponse.json(
         {
           success: false,
-          message: `Cannot delete fee type: it has ${existing.assignments.length} assignment(s). Delete assignments first.`,
+          message: `Cannot delete fee type: it has ${existing.assignments.length} assignment(s). Confirm force delete to remove them and their payment records as well.`,
         },
         { status: 409 }
       );
     }
 
-    await db.feeType.delete({ where: { id } });
+    await db.$transaction([
+      // Remove payments linked to this fee type's assignments
+      db.payment.deleteMany({
+        where: { tenantId, assignment: { feeTypeId: id } },
+      }),
+      // Remove the assignments themselves
+      db.feeAssignment.deleteMany({ where: { feeTypeId: id, tenantId } }),
+      // Finally remove the fee type
+      db.feeType.delete({ where: { id } }),
+    ]);
 
-    return NextResponse.json(
-      { success: true, message: "Fee type deleted successfully" }
-    );
+    return NextResponse.json({
+      success: true,
+      message:
+        existing.assignments.length > 0
+          ? `Fee type, its ${existing.assignments.length} assignment(s) and linked payment(s) deleted successfully`
+          : "Fee type deleted successfully",
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
     return NextResponse.json(

@@ -87,6 +87,7 @@ export async function GET(request: Request) {
         title: assignment.title,
         description: assignment.description,
         instructions: assignment.instructions,
+        attachmentUrl: assignment.attachmentUrl,
         dueDate: assignment.dueDate,
         dueTime: assignment.dueTime,
         maxScore: assignment.maxScore,
@@ -99,14 +100,14 @@ export async function GET(request: Request) {
         totalSubmissions: assignment._count.submissions,
         submission: submission
           ? {
-              id: submission.id,
-              content: submission.content,
-              score: submission.score,
-              feedback: submission.feedback,
-              status: submission.status,
-              submittedAt: submission.submittedAt,
-              gradedAt: submission.gradedAt,
-            }
+            id: submission.id,
+            content: submission.content,
+            score: submission.score,
+            feedback: submission.feedback,
+            status: submission.status,
+            submittedAt: submission.submittedAt,
+            gradedAt: submission.gradedAt,
+          }
           : null,
         submitted: !!submission,
         overdue: isOverdue,

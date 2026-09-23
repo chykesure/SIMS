@@ -20,6 +20,12 @@ import {
   CircleDollarSign,
   Building,
   Loader2,
+  Eye,
+  Printer,
+  Download,
+  AlertTriangle,
+  Scale,
+  CheckCircle2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -76,10 +82,121 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
 
+// ─── Balance / CSV / Receipt helpers ──────────────────────────────
+
+/** Visual metadata for a student's fee balance status. */
+function getFeeStatusMeta(feeStatus?: string, outstanding?: number): {
+  label: string;
+  className: string;
+} {
+  switch (feeStatus) {
+    case 'fully_paid':
+      return { label: 'Fully Paid', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    case 'partial':
+      return {
+        label: `Outstanding ${formatCurrency(outstanding ?? 0)}`,
+        className: 'bg-amber-100 text-amber-800 border-amber-200',
+      };
+    case 'overpaid':
+      return { label: 'Overpaid', className: 'bg-orange-100 text-orange-700 border-orange-200' };
+    case 'unpaid':
+      return { label: 'Unpaid', className: 'bg-red-100 text-red-700 border-red-200' };
+    default:
+      return { label: feeStatus || '—', className: '' };
+  }
+}
+
+/** Download an array of rows as a CSV file. */
+function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [
+    headers.map(escape).join(','),
+    ...rows.map((r) => r.map(escape).join(',')),
+  ].join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Open a printable receipt window for a payment. */
+function printReceipt(p: Payment & { feeAmount?: number; outstanding?: number }) {
+  const rows: [string, string][] = [
+    ['Receipt No', p.receiptNo || '—'],
+    ['Date', p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'],
+    ['Student Name', p.studentName],
+    ['Reg No', p.studentRegNo || '—'],
+    ['Fee Type', p.feeTypeName || p.assignment?.feeType?.name || '—'],
+    ['Class', p.assignment?.className || '—'],
+    ['Session', p.session || '—'],
+    ['Term', p.term || '—'],
+    ['Amount Paid', formatCurrency(p.amount)],
+    ['Fee Amount', formatCurrency(p.feeAmount ?? 0)],
+    ['Outstanding Balance', formatCurrency(Math.max(0, p.outstanding ?? 0))],
+    ['Payment Method', METHOD_LABELS[p.method] || p.method],
+    ['Reference', p.reference || '—'],
+    ['Paid By', p.paidBy || '—'],
+    ['Note', p.note || '—'],
+  ];
+
+  const win = window.open('', '_blank', 'width=800,height=900');
+  if (!win) return false;
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Receipt ${p.receiptNo}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 24px; }
+    .receipt { max-width: 640px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .header { background: #059669; color: #fff; padding: 24px; text-align: center; }
+    .header h1 { font-size: 22px; letter-spacing: 1px; }
+    .header p { font-size: 12px; opacity: 0.9; margin-top: 4px; }
+    .body { padding: 24px; }
+    .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px; }
+    .row:last-child { border-bottom: none; }
+    .row .label { color: #64748b; }
+    .row .value { font-weight: 600; text-align: right; max-width: 60%; }
+    .amount-box { margin: 16px 0; padding: 16px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; text-align: center; }
+    .amount-box .amt { font-size: 28px; font-weight: 700; color: #047857; }
+    .amount-box .cap { font-size: 12px; color: #059669; margin-top: 2px; }
+    .footer { padding: 16px 24px 24px; text-align: center; color: #94a3b8; font-size: 11px; }
+    @media print { body { background: #fff; padding: 0; } .receipt { border: none; } }
+  </style>
+</head>
+<body>
+  <div class="receipt">
+    <div class="header">
+      <h1>PAYMENT RECEIPT</h1>
+      <p>Official Fee Payment Confirmation</p>
+    </div>
+    <div class="body">
+      ${rows.map(([l, v]) => `<div class="row"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
+      <div class="amount-box">
+        <div class="amt">${formatCurrency(p.amount)}</div>
+        <div class="cap">Amount Paid — ${METHOD_LABELS[p.method] || p.method}</div>
+      </div>
+    </div>
+    <div class="footer">This receipt was generated electronically and is valid without a physical signature.</div>
+  </div>
+</body>
+</html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+  return true;
+}
+
 const fadeIn = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.3, ease: 'easeOut' },
+  transition: { duration: 0.3, ease: 'easeOut' as const },
 };
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -92,6 +209,7 @@ interface FeeType {
   frequency: string;
   isActive: boolean;
   createdAt: string;
+  _count?: { assignments: number };
 }
 
 interface FeeAssignment {
@@ -106,6 +224,7 @@ interface FeeAssignment {
   isActive: boolean;
   createdAt: string;
   feeType?: { id: string; name: string; frequency: string };
+  _count?: { payments: number };
 }
 
 interface Payment {
@@ -125,7 +244,39 @@ interface Payment {
   status: string;
   receiptNo: string;
   createdAt: string;
-  assignment?: { id: string; className: string; feeType?: { id: string; name: string } };
+  assignment?: { id: string; className: string; amount?: number; feeType?: { id: string; name: string } };
+  // Computed balance fields from the API
+  feeAmount?: number;
+  totalPaid?: number;
+  outstanding?: number;
+  feeStatus?: string; // fully_paid | partial | unpaid | overpaid
+}
+
+interface BalanceRow {
+  assignmentId: string;
+  studentId: string;
+  studentName: string;
+  regNo: string;
+  className: string;
+  feeTypeName: string;
+  session: string;
+  term: string;
+  dueDate: string;
+  feeAmount: number;
+  totalPaid: number;
+  outstanding: number;
+  status: string;
+}
+
+interface BalancesSummary {
+  totalExpected: number;
+  totalCollected: number;
+  totalOutstanding: number;
+  fullyPaid: number;
+  partial: number;
+  unpaid: number;
+  overpaid: number;
+  rowCount: number;
 }
 
 interface IncomeExpense {
@@ -307,6 +458,9 @@ export function FinanceView() {
           <TabsTrigger value="payments" className="gap-1.5 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">
             <Receipt className="size-4" /> Payments
           </TabsTrigger>
+          <TabsTrigger value="balances" className="gap-1.5 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">
+            <Scale className="size-4" /> Balances
+          </TabsTrigger>
           <TabsTrigger value="income-expense" className="gap-1.5 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">
             <CreditCard className="size-4" /> Income &amp; Expense
           </TabsTrigger>
@@ -342,6 +496,14 @@ export function FinanceView() {
             sessions={sessions}
             sessionLabel={sessionLabel}
             onRefresh={refreshData}
+          />
+        </TabsContent>
+
+        <TabsContent value="balances">
+          <BalancesTab
+            classes={classes}
+            sessions={sessions}
+            sessionLabel={sessionLabel}
           />
         </TabsContent>
 
@@ -615,6 +777,7 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FeeType | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [forceDelete, setForceDelete] = useState(false);
 
   // Form
   const [formName, setFormName] = useState('');
@@ -709,15 +872,17 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/finance/fees/${deleteTarget.id}`, { method: 'DELETE' });
+      const url = `/api/finance/fees/${deleteTarget.id}${forceDelete ? '?force=true' : ''}`;
+      const res = await fetch(url, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.message || 'Failed to delete');
         return;
       }
-      toast.success('Fee type deleted');
+      toast.success(data.message || 'Fee type deleted');
       setDeleteOpen(false);
       setDeleteTarget(null);
+      setForceDelete(false);
       onRefresh();
     } catch {
       toast.error('Network error');
@@ -765,6 +930,7 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
                     <TableHead>Description</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Frequency</TableHead>
+                    <TableHead>Assignments</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -781,6 +947,9 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
                         <Badge variant="outline" className="capitalize">
                           {ft.frequency}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{(ft._count?.assignments ?? 0)} assigned</Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant={ft.isActive ? 'default' : 'secondary'}>
@@ -809,7 +978,7 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
                             variant="ghost"
                             size="icon"
                             className="size-8 text-destructive hover:text-destructive"
-                            onClick={() => { setDeleteTarget(ft); setDeleteOpen(true); }}
+                            onClick={() => { setDeleteTarget(ft); setForceDelete(false); setDeleteOpen(true); }}
                             title="Delete"
                           >
                             <Trash2 className="size-4" />
@@ -880,16 +1049,44 @@ function FeeTypesTab({ feeTypes, onRefresh }: {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Fee Type</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete <span className="font-semibold">{deleteTarget?.name}</span>?
-              This action cannot be undone. Any existing assignments will prevent deletion.
+            <AlertDialogDescription className="space-y-3">
+              <span className="block">
+                Are you sure you want to delete <span className="font-semibold">{deleteTarget?.name}</span>?
+                This action cannot be undone.
+              </span>
+              {(deleteTarget?._count?.assignments ?? 0) > 0 && (
+                <span className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                  <span className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      This fee type has <strong>{deleteTarget?._count?.assignments} assignment(s)</strong> which may
+                      include student payment records. You cannot delete it until they are removed.
+                    </span>
+                  </span>
+                  <label className="mt-3 flex items-start gap-2 text-sm font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={forceDelete}
+                      onChange={(e) => setForceDelete(e.target.checked)}
+                      className="mt-0.5 size-4 accent-amber-600"
+                    />
+                    <span>
+                      Force delete — also permanently remove all its assignments and linked payment records
+                    </span>
+                  </label>
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-white hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting || ((deleteTarget?._count?.assignments ?? 0) > 0 && !forceDelete)}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
               {deleting && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Delete
+              {(deleteTarget?._count?.assignments ?? 0) > 0 && !forceDelete ? 'Blocked' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -912,9 +1109,15 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<FeeAssignment | null>(null);
   const [filterClass, setFilterClass] = useState('all');
   const [filterSession, setFilterSession] = useState('all');
   const [filterTerm, setFilterTerm] = useState('all');
+
+  // Delete
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FeeAssignment | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Form
   const [formFeeType, setFormFeeType] = useState('');
@@ -934,6 +1137,7 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
   });
 
   function openAdd() {
+    setEditing(null);
     setFormFeeType('');
     setFormClass('all');
     setFormSession('');
@@ -941,6 +1145,42 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
     setFormAmount('');
     setFormDueDate('');
     setDialogOpen(true);
+  }
+
+  function openEdit(a: FeeAssignment) {
+    setEditing(a);
+    setFormFeeType(a.feeTypeId);
+    setFormClass(a.className || 'all');
+    // The stored session is a label like "2026/2027" — map back to the session id
+    const sess = sessions.find((s) => `${s.sessionOne}/${s.sessionTwo}` === a.session);
+    setFormSession(sess?.id ?? '');
+    setFormTerm(a.term || '');
+    setFormAmount(String(a.amount));
+    setFormDueDate(a.dueDate || '');
+    setDialogOpen(true);
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const hasPayments = (deleteTarget._count?.payments ?? 0) > 0;
+      const url = `/api/finance/assignments/${deleteTarget.id}${hasPayments ? '?force=true' : ''}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || 'Failed to delete');
+        return;
+      }
+      toast.success(data.message || 'Fee assignment deleted');
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      onRefresh();
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setDeleting(false);
+    }
   }
 
   useEffect(() => {
@@ -956,22 +1196,30 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
     setSaving(true);
     try {
       const sess = sessions.find((s) => s.id === formSession);
-      const res = await fetch('/api/finance/assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          feeTypeId: formFeeType,
-          className: formClass,
-          session: sess ? `${sess.sessionOne}/${sess.sessionTwo}` : '',
-          term: formTerm,
-          amount: parseFloat(formAmount) || 0,
-          dueDate: formDueDate,
-        }),
-      });
+      const payload = {
+        feeTypeId: formFeeType,
+        className: formClass,
+        session: sess ? `${sess.sessionOne}/${sess.sessionTwo}` : '',
+        term: formTerm,
+        amount: parseFloat(formAmount) || 0,
+        dueDate: formDueDate,
+      };
+      const res = editing
+        ? await fetch(`/api/finance/assignments/${editing.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        : await fetch('/api/finance/assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.message || 'Failed to create assignment'); return; }
-      toast.success('Fee assigned successfully');
+      if (!res.ok) { toast.error(data.message || 'Failed to save assignment'); return; }
+      toast.success(editing ? 'Fee assignment updated successfully' : 'Fee assigned successfully');
       setDialogOpen(false);
+      setEditing(null);
       onRefresh();
     } catch {
       toast.error('Network error');
@@ -1038,7 +1286,9 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
                     <TableHead>Term</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Due Date</TableHead>
+                    <TableHead>Payments</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1053,9 +1303,30 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
                       <TableCell className="font-mono text-sm">{formatCurrency(a.amount)}</TableCell>
                       <TableCell>{a.dueDate || '—'}</TableCell>
                       <TableCell>
+                        <Badge variant={(a._count?.payments ?? 0) > 0 ? 'default' : 'outline'}>
+                          {a._count?.payments ?? 0} payment{(a._count?.payments ?? 0) === 1 ? '' : 's'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={a.isActive ? 'default' : 'secondary'}>
                           {a.isActive ? 'Active' : 'Inactive'}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="size-8" onClick={() => openEdit(a)} title="Edit">
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-destructive hover:text-destructive"
+                            onClick={() => { setDeleteTarget(a); setDeleteOpen(true); }}
+                            title="Delete"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1070,8 +1341,10 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Assign Fee</DialogTitle>
-            <DialogDescription>Assign a fee type to a class for a specific session/term.</DialogDescription>
+            <DialogTitle>{editing ? 'Edit Fee Assignment' : 'Assign Fee'}</DialogTitle>
+            <DialogDescription>
+              {editing ? 'Update the fee assignment details below.' : 'Assign a fee type to a class for a specific session/term.'}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -1137,12 +1410,46 @@ function AssignmentsTab({ feeTypes, classes, sessions, sessionLabel, assignments
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button>
               <Button type="submit" disabled={saving}>
                 {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-                Assign Fee
+                {editing ? 'Update Assignment' : 'Assign Fee'}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Fee Assignment</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                Are you sure you want to delete the assignment of{' '}
+                <span className="font-semibold">{deleteTarget?.feeType?.name}</span>{' '}
+                for <span className="font-semibold">{deleteTarget?.className === 'all' ? 'All Classes' : deleteTarget?.className}</span>{' '}
+                ({deleteTarget?.session})?
+              </span>
+              {(deleteTarget?._count?.payments ?? 0) > 0 && (
+                <span className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    This assignment has <strong>{deleteTarget?._count?.payments} linked payment record(s)</strong>.
+                    Deleting it will <strong>permanently remove those payment records</strong> as well. Consider
+                    deactivating it instead if you want to keep the payment history.
+                  </span>
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-white hover:bg-destructive/90">
+              {deleting && <Loader2 className="mr-2 size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1166,6 +1473,13 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
   const [filterSession, setFilterSession] = useState('all');
   const [filterTerm, setFilterTerm] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [search, setSearch] = useState('');
+
+  // Receipt view + delete
+  const [receiptPayment, setReceiptPayment] = useState<Payment | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Payment | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Form
   const [formStudent, setFormStudent] = useState('');
@@ -1182,7 +1496,12 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
   const filtered = payments.filter((p) => {
     if (filterSession !== 'all' && p.session !== filterSession) return false;
     if (filterTerm !== 'all' && p.term !== filterTerm) return false;
-    if (filterStatus !== 'all' && p.status !== filterStatus) return false;
+    if (filterStatus !== 'all' && (p.feeStatus ?? p.status) !== filterStatus) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const haystack = `${p.studentName} ${p.studentRegNo} ${p.receiptNo} ${p.feeTypeName}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 
@@ -1209,6 +1528,20 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
     ? assignments.filter((a) => a.className === 'all' || a.className === selectedStudent.class)
     : assignments;
 
+  // ── Live balance for the Record Payment dialog ──
+  const dialogBalance = (() => {
+    const feeAmount = selectedAssignment?.amount ?? 0;
+    const totalPaid = selectedStudent && selectedAssignment
+      ? payments
+        .filter((p) => p.studentId === formStudent && p.assignmentId === formAssignment)
+        .reduce((s, p) => s + p.amount, 0)
+      : 0;
+    return { feeAmount, totalPaid, outstanding: feeAmount - totalPaid };
+  })();
+  const overpayAmount = formAmount
+    ? parseFloat(formAmount) - dialogBalance.outstanding
+    : 0;
+
   function openAdd() {
     setFormStudent('');
     setFormAssignment('');
@@ -1221,10 +1554,11 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
   }
 
   useEffect(() => {
-    if (selectedAssignment && !formAmount) {
-      setFormAmount(String(selectedAssignment.amount));
+    // Pre-fill the amount with the OUTSTANDING balance (not the full fee)
+    if (selectedStudent && selectedAssignment) {
+      setFormAmount(String(Math.max(0, dialogBalance.outstanding)));
     }
-  }, [selectedAssignment, formAmount]);
+  }, [selectedStudent, selectedAssignment]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (selectedStudent) {
@@ -1264,7 +1598,7 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.message || 'Failed to record payment'); return; }
-      toast.success('Payment recorded successfully');
+      toast.success(data.message || 'Payment recorded successfully');
       setDialogOpen(false);
       fetchPayments();
       onRefresh();
@@ -1273,6 +1607,59 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDeletePayment() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/finance/payments/${deleteTarget.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || 'Failed to delete payment');
+        return;
+      }
+      toast.success('Payment record deleted');
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      fetchPayments();
+      onRefresh();
+    } catch {
+      toast.error('Network error');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function handleViewReceipt(p: Payment) {
+    const ok = printReceipt(p);
+    if (!ok) {
+      setReceiptPayment(p);
+    }
+  }
+
+  function handleExportCSV() {
+    downloadCSV(
+      `payments-${new Date().toISOString().split('T')[0]}.csv`,
+      ['Receipt No', 'Student Name', 'Reg No', 'Fee Type', 'Amount Paid', 'Fee Amount', 'Total Paid', 'Outstanding', 'Method', 'Reference', 'Session', 'Term', 'Paid By', 'Date'],
+      filtered.map((p) => [
+        p.receiptNo,
+        p.studentName,
+        p.studentRegNo,
+        p.feeTypeName,
+        p.amount,
+        p.feeAmount ?? 0,
+        p.totalPaid ?? p.amount,
+        Math.max(0, p.outstanding ?? 0),
+        METHOD_LABELS[p.method] || p.method,
+        p.reference,
+        p.session,
+        p.term,
+        p.paidBy,
+        p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '',
+      ]),
+    );
+    toast.success('Payments exported to CSV');
   }
 
   return (
@@ -1300,18 +1687,32 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
             </SelectContent>
           </Select>
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[140px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+            <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="partial">Partial</SelectItem>
-              <SelectItem value="refunded">Refunded</SelectItem>
+              <SelectItem value="fully_paid">Fully Paid</SelectItem>
+              <SelectItem value="partial">Partial / Outstanding</SelectItem>
+              <SelectItem value="overpaid">Overpaid</SelectItem>
             </SelectContent>
           </Select>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search student / receipt..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-[200px] pl-9"
+            />
+          </div>
         </div>
-        <Button onClick={openAdd} className="gap-2">
-          <Plus className="size-4" /> Record Payment
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleExportCSV} className="gap-2">
+            <Download className="size-4" /> Export
+          </Button>
+          <Button onClick={openAdd} className="gap-2">
+            <Plus className="size-4" /> Record Payment
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -1333,10 +1734,11 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
                     <TableHead>Student Name</TableHead>
                     <TableHead>Reg No</TableHead>
                     <TableHead>Fee Type</TableHead>
-                    <TableHead>Amount</TableHead>
+                    <TableHead>Amount Paid</TableHead>
+                    <TableHead>Balance Status</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1346,25 +1748,45 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
                       <TableCell className="font-medium">{p.studentName}</TableCell>
                       <TableCell className="text-muted-foreground">{p.studentRegNo || '—'}</TableCell>
                       <TableCell>{p.feeTypeName}</TableCell>
-                      <TableCell className="font-mono text-sm">{formatCurrency(p.amount)}</TableCell>
+                      <TableCell className="font-mono text-sm font-medium">{formatCurrency(p.amount)}</TableCell>
+                      <TableCell>
+                        {(() => {
+                          const meta = getFeeStatusMeta(p.feeStatus, p.outstanding);
+                          return (
+                            <Badge variant="outline" className={meta.className || undefined} title={`Fee: ${formatCurrency(p.feeAmount ?? 0)} · Paid: ${formatCurrency(p.totalPaid ?? p.amount)}`}>
+                              {p.feeStatus === 'fully_paid' && <CheckCircle2 className="mr-1 size-3" />}
+                              {meta.label}
+                            </Badge>
+                          );
+                        })()}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{METHOD_LABELS[p.method] || p.method}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs">
                         {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}
                       </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            p.status === 'completed'
-                              ? 'default'
-                              : p.status === 'partial'
-                                ? 'secondary'
-                                : 'outline'
-                          }
-                        >
-                          {p.status}
-                        </Badge>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            onClick={() => handleViewReceipt(p)}
+                            title="View / Print Receipt"
+                          >
+                            <Printer className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-destructive hover:text-destructive"
+                            onClick={() => { setDeleteTarget(p); setDeleteOpen(true); }}
+                            title="Delete Payment"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1415,9 +1837,51 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
               </Select>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
+              {/* Balance summary card */}
+              {selectedStudent && selectedAssignment && (
+                <div className="sm:col-span-2 rounded-lg border bg-muted/40 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                    Payment Balance — {selectedAssignment.feeType?.name} ({selectedAssignment.session}{selectedAssignment.term ? ` · ${selectedAssignment.term}` : ''})
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Fee Due</p>
+                      <p className="text-sm font-bold">{formatCurrency(dialogBalance.feeAmount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Already Paid</p>
+                      <p className="text-sm font-bold text-emerald-700">{formatCurrency(dialogBalance.totalPaid)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Outstanding</p>
+                      <p className={`text-sm font-bold ${dialogBalance.outstanding > 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
+                        {formatCurrency(Math.max(0, dialogBalance.outstanding))}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Amount (NGN) <span className="text-destructive">*</span></Label>
-                <Input type="number" min="0" step="0.01" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="0.00" required />
+                <div className="flex gap-2">
+                  <Input type="number" min="0" step="0.01" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} placeholder="0.00" required />
+                  {selectedStudent && selectedAssignment && dialogBalance.outstanding > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0 whitespace-nowrap"
+                      onClick={() => setFormAmount(String(Math.max(0, dialogBalance.outstanding)))}
+                    >
+                      Pay Outstanding
+                    </Button>
+                  )}
+                </div>
+                {overpayAmount > 0 && (
+                  <p className="flex items-center gap-1 text-xs text-amber-600">
+                    <AlertTriangle className="size-3 shrink-0" />
+                    This payment exceeds the outstanding balance by {formatCurrency(overpayAmount)} — it will be recorded as overpaid.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Payment Method</Label>
@@ -1455,6 +1919,302 @@ function PaymentsTab({ students, assignments, feeTypes, sessions, sessionLabel, 
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Receipt fallback dialog (shown only if the print popup is blocked) */}
+      <Dialog open={!!receiptPayment} onOpenChange={(open) => !open && setReceiptPayment(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Payment Receipt</DialogTitle>
+            <DialogDescription>Receipt {receiptPayment?.receiptNo}</DialogDescription>
+          </DialogHeader>
+          {receiptPayment && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Student</span><span className="font-medium">{receiptPayment.studentName}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Fee Type</span><span>{receiptPayment.feeTypeName}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Amount Paid</span><span className="font-bold text-emerald-700">{formatCurrency(receiptPayment.amount)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Outstanding</span><span className="font-medium">{formatCurrency(Math.max(0, receiptPayment.outstanding ?? 0))}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Method</span><span>{METHOD_LABELS[receiptPayment.method] || receiptPayment.method}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span>{receiptPayment.createdAt ? new Date(receiptPayment.createdAt).toLocaleString() : '—'}</span></div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button className="gap-2" onClick={() => receiptPayment && printReceipt(receiptPayment)}>
+              <Printer className="size-4" /> Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Payment Confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Payment Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete receipt <span className="font-semibold">{deleteTarget?.receiptNo}</span> for{' '}
+              <span className="font-semibold">{deleteTarget?.studentName}</span> ({formatCurrency(deleteTarget?.amount ?? 0)})?
+              This is used to void mistaken entries — the student's outstanding balance will be recalculated automatically.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeletePayment} disabled={deleting} className="bg-destructive text-white hover:bg-destructive/90">
+              {deleting && <Loader2 className="mr-2 size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ====================================================================
+// TAB 6: BALANCES (outstanding fees per student)
+// ====================================================================
+
+function BalancesTab({ classes, sessions, sessionLabel }: {
+  classes: ClassItem[];
+  sessions: SessionItem[];
+  sessionLabel: (s: SessionItem) => string;
+}) {
+  const [rows, setRows] = useState<BalanceRow[]>([]);
+  const [summary, setSummary] = useState<BalancesSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  // Filters
+  const [filterClass, setFilterClass] = useState('all');
+  const [filterSession, setFilterSession] = useState('all');
+  const [filterTerm, setFilterTerm] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  const fetchBalances = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterClass !== 'all') params.set('className', filterClass);
+      if (filterSession !== 'all') {
+        const s = sessions.find((x) => x.id === filterSession);
+        if (s) params.set('session', `${s.sessionOne}/${s.sessionTwo}`);
+      }
+      if (filterTerm !== 'all') params.set('term', filterTerm);
+      if (filterStatus !== 'all') params.set('status', filterStatus);
+      if (search.trim()) params.set('search', search.trim());
+
+      const res = await fetch(`/api/finance/balances?${params.toString()}`);
+      if (res.ok) {
+        const d = await res.json();
+        setRows(d.data?.rows ?? []);
+        setSummary(d.data?.summary ?? null);
+      } else {
+        toast.error('Failed to load fee balances');
+      }
+    } catch {
+      toast.error('Network error loading balances');
+    } finally {
+      setLoading(false);
+    }
+  }, [filterClass, filterSession, filterTerm, filterStatus, search, sessions]);
+
+  useEffect(() => {
+    const t = setTimeout(fetchBalances, 300); // debounce search
+    return () => clearTimeout(t);
+  }, [fetchBalances]);
+
+  function handleExportCSV() {
+    downloadCSV(
+      `fee-balances-${new Date().toISOString().split('T')[0]}.csv`,
+      ['Student Name', 'Reg No', 'Class', 'Fee Type', 'Session', 'Term', 'Amount Due', 'Total Paid', 'Outstanding', 'Status', 'Due Date'],
+      rows.map((r) => [
+        r.studentName,
+        r.regNo,
+        r.className,
+        r.feeTypeName,
+        r.session,
+        r.term,
+        r.feeAmount,
+        r.totalPaid,
+        r.outstanding,
+        getFeeStatusMeta(r.status, r.outstanding).label,
+        r.dueDate,
+      ]),
+    );
+    toast.success('Balances exported to CSV');
+  }
+
+  const statusBadge = (r: BalanceRow) => {
+    const meta = getFeeStatusMeta(r.status, r.outstanding);
+    return (
+      <Badge variant="outline" className={meta.className || undefined}>
+        {r.status === 'fully_paid' && <CheckCircle2 className="mr-1 size-3" />}
+        {meta.label}
+      </Badge>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+              <DollarSign className="size-4 text-slate-600" /> Total Expected
+            </div>
+            <p className="text-xl font-bold">{formatCurrency(summary?.totalExpected ?? 0)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+              <TrendingUp className="size-4 text-emerald-600" /> Total Collected
+            </div>
+            <p className="text-xl font-bold text-emerald-700">{formatCurrency(summary?.totalCollected ?? 0)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+              <ArrowDownRight className="size-4 text-amber-500" /> Total Outstanding
+            </div>
+            <p className="text-xl font-bold text-amber-600">{formatCurrency(summary?.totalOutstanding ?? 0)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+              <Scale className="size-4 text-slate-600" /> Fee Status Count
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                {summary?.fullyPaid ?? 0} paid
+              </Badge>
+              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
+                {summary?.partial ?? 0} partial
+              </Badge>
+              <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200">
+                {summary?.unpaid ?? 0} unpaid
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <Filter className="size-4 text-muted-foreground" />
+          <Select value={filterClass} onValueChange={setFilterClass}>
+            <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Classes" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {classes.map((c) => (
+                <SelectItem key={c.id} value={c.title}>{c.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterSession} onValueChange={setFilterSession}>
+            <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Sessions" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sessions</SelectItem>
+              {sessions.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{sessionLabel(s)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterTerm} onValueChange={setFilterTerm}>
+            <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Terms" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Terms</SelectItem>
+              {TERM_OPTIONS.map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="fully_paid">Fully Paid</SelectItem>
+              <SelectItem value="partial">Partial / Outstanding</SelectItem>
+              <SelectItem value="unpaid">Unpaid</SelectItem>
+              <SelectItem value="overpaid">Overpaid</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search student / reg no..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-[200px] pl-9"
+            />
+          </div>
+        </div>
+        <Button variant="outline" onClick={handleExportCSV} className="gap-2 shrink-0">
+          <Download className="size-4" /> Export
+        </Button>
+      </div>
+
+      {/* Ledger Table */}
+      <Card>
+        <CardContent className="p-0">
+          {loading ? (
+            <TableSkeleton rows={6} cols={8} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={Scale}
+              title="No balance records"
+              description="Assign fees to classes and record payments to see student balances here."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Student</TableHead>
+                    <TableHead>Reg No</TableHead>
+                    <TableHead>Class</TableHead>
+                    <TableHead>Fee Type</TableHead>
+                    <TableHead>Session / Term</TableHead>
+                    <TableHead>Amount Due</TableHead>
+                    <TableHead>Paid</TableHead>
+                    <TableHead>Outstanding</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => (
+                    <TableRow key={`${r.studentId}-${r.assignmentId}`}>
+                      <TableCell className="font-medium">{r.studentName}</TableCell>
+                      <TableCell className="text-muted-foreground">{r.regNo}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{r.className}</Badge>
+                      </TableCell>
+                      <TableCell>{r.feeTypeName}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {r.session} · {r.term}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{formatCurrency(r.feeAmount)}</TableCell>
+                      <TableCell className="font-mono text-sm text-emerald-700">{formatCurrency(r.totalPaid)}</TableCell>
+                      <TableCell className={`font-mono text-sm font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
+                        {formatCurrency(r.outstanding)}
+                      </TableCell>
+                      <TableCell>{statusBadge(r)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {!loading && rows.length > 0 && (
+        <p className="text-xs text-muted-foreground text-right">
+          Showing {rows.length} balance record{rows.length === 1 ? '' : 's'}
+        </p>
+      )}
     </div>
   );
 }

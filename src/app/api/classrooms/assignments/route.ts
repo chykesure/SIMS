@@ -79,6 +79,7 @@ export async function POST(request: Request) {
       dueDate,
       dueTime,
       maxScore,
+      attachmentUrl,
     } = body;
 
     if (!classroomId || !title || !title.trim()) {
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
         dueTime: dueTime || "",
         maxScore: maxScore !== undefined ? Number(maxScore) : 100,
         status: "active",
+        attachmentUrl: attachmentUrl || "",
       },
     });
 

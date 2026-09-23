@@ -31,6 +31,10 @@ import UserListView from "@/components/users/user-list";
 import AssessmentSettingsView from "@/components/settings/assessment-settings";
 import { SubscriptionPage } from "@/components/settings/subscription-page";
 import { FinanceView } from "@/components/finance/finance-view";
+import { CbtView } from "@/components/cbt/cbt-view";
+import { StudentCbt } from "@/components/student/student-cbt";
+import { AttendanceView } from "@/components/attendance/attendance-view";
+import { StudentAttendance } from "@/components/student/student-attendance";
 import { ClassroomView } from "@/components/classroom/classroom-view";
 import { DevSidebar } from "@/components/dev/dev-sidebar";
 import { DevHeader } from "@/components/dev/dev-header";
@@ -94,6 +98,10 @@ function StudentPortalContent() {
       return <StudentAssignments />;
     case "student-announcements":
       return <StudentAnnouncements />;
+    case "student-cbt":
+      return <StudentCbt />;
+    case "student-attendance":
+      return <StudentAttendance />;
     default:
       return <StudentDashboard />;
   }
@@ -126,6 +134,10 @@ function TeacherPortalContent() {
       return <ResultView />;
     case "teacher-broadsheet":
       return <BroadsheetView />;
+    case "teacher-cbt":
+      return <CbtView />;
+    case "attendance":
+      return <AttendanceView />;
     default:
       return <TeacherDashboard />;
   }
@@ -220,6 +232,10 @@ function AdminPortalContent() {
       return <SubscriptionPage />;
     case "finance":
       return <FinanceView />;
+    case "cbt":
+      return <CbtView />;
+    case "attendance":
+      return <AttendanceView />;
     case "budgets":
       return <BudgetView />;
     case "inventory":

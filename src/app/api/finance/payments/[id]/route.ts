@@ -81,7 +81,6 @@ export async function PUT(
     );
   }
 }
-
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -92,26 +91,18 @@ export async function DELETE(
 
     if (!id) {
       return NextResponse.json(
-        { success: false, message: "Payment ID is required" },
-        { status: 400 }
-      );
+        { success: false, message: "Payment ID is required" }, { status: 400 });
     }
 
-    const existing = await db.payment.findFirst({
-      where: { id, tenantId },
-    });
+    const existing = await db.payment.findFirst({ where: { id, tenantId } });
     if (!existing) {
       return NextResponse.json(
-        { success: false, message: "Payment not found" },
-        { status: 404 }
-      );
+        { success: false, message: "Payment not found" }, { status: 404 });
     }
 
     await db.payment.delete({ where: { id } });
 
-    return NextResponse.json(
-      { success: true, message: "Payment deleted successfully" }
-    );
+    return NextResponse.json({ success: true, message: "Payment deleted successfully" });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error occurred";
     return NextResponse.json(

@@ -30,6 +30,8 @@ import {
   BarChart3,
   Sparkles,
   TableIcon,
+  MonitorPlay,
+  ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -68,6 +70,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Classes', page: 'teacher-classes', icon: School },
       { label: 'Subjects', page: 'teacher-subjects', icon: BookOpen },
       { label: 'Score Entry', page: 'teacher-scores', icon: FileEdit },
+      { label: 'CBT & Exams', page: 'teacher-cbt', icon: MonitorPlay },
+      { label: 'Attendance', page: 'attendance', icon: ClipboardCheck },
       { label: 'Results', page: 'teacher-results', icon: BarChart3 },
       { label: 'Broadsheet', page: 'teacher-broadsheet', icon: TableIcon },
       { label: 'AI Assistant', page: 'teacher-ai-assistant', icon: Sparkles },

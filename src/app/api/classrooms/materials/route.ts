@@ -19,16 +19,16 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const classroomId = searchParams.get("classroomId");
 
-    if (!classroomId) {
-      return NextResponse.json(
-        { success: false, message: "classroomId is required" },
-        { status: 400 }
-      );
-    }
-
+    // classroomId is optional — when omitted, return all materials
+    // for the tenant (used by teacher & student portals)
     const materials = await db.classMaterial.findMany({
-      where: { tenantId, classroomId },
+      where: classroomId ? { tenantId, classroomId } : { tenantId },
       orderBy: { createdAt: "desc" },
+      include: {
+        classroom: {
+          select: { id: true, name: true },
+        },
+      },
     });
 
     return NextResponse.json({ success: true, data: materials });

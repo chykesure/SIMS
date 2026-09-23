@@ -54,6 +54,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { ClassroomMaterials } from '@/components/classroom/classroom-materials'
 
 interface ClassroomData {
   id: string
@@ -175,7 +176,7 @@ export function TeacherAssignments() {
         const data = json.success ? json.data : []
         setClassrooms(data)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [fetchAssignments])
 
   // ─── File Upload Handler ──────────────────────────────────
@@ -804,6 +805,9 @@ export function TeacherAssignments() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Class materials shared from the admin Classroom module */}
+      <ClassroomMaterials />
 
       {/* Empty state */}
       {assignments.length === 0 ? (
